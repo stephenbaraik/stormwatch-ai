@@ -169,6 +169,10 @@ def run_ingest_batch(
     # ── Optional Supabase client ──
     supabase = _get_supabase_client() if upload else None
 
+    # Ensure database schema exists before any operations
+    if supabase:
+        supabase.ensure_tables()
+
     batch_id: Optional[int] = None
     if supabase:
         try:

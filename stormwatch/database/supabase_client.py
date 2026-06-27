@@ -72,20 +72,20 @@ class SupabaseClient:
 
     # ── Schema management ──
 
-    def ensure_tables(self) -> None:
+    def ensure_tables(self) -> bool:
         """Create the required tables if they don't exist.
 
-        Runs the DDL via Supabase's pg SQL endpoint. Safe to call
-        repeatedly — uses IF NOT EXISTS.
+        Safe to call repeatedly — uses IF NOT EXISTS.
+        Tries multiple approaches:
+          1. exec_sql RPC (if the function exists in Supabase)
+          2. Direct Postgres connection via SUPABASE_DB_URL
+          3. Connection pooler with JWT auth
+
+        Returns True if schema was applied successfully, False otherwise.
         """
-        sql = _SCHEMA_SQL
-        try:
-            self._get_client().rpc("exec_sql", {"query": sql}).execute()
-        except Exception:
-            log.info(
-                "Could not auto-create tables via RPC. "
-                "Run the SQL in stormwatch/database/schema.sql manually."
-            )
+        from stormwatch.database.migrate import migrate
+
+        return migrate()
 
     # ── Batch tracking ──
 
