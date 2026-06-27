@@ -156,26 +156,57 @@ class SupabaseClient:
 
     # ── Data ingestion ──
 
+    _SUPABASE_WEATHER_COLS: set[str] = {
+        # identifiers
+        "id",
+        "city",
+        "time",
+        # raw weather columns
+        "temperature_2m_max",
+        "temperature_2m_min",
+        "temperature_2m_mean",
+        "precipitation_sum",
+        "rain_sum",
+        "snowfall_sum",
+        "precipitation_hours",
+        "wind_speed_10m_max",
+        "wind_gusts_10m_max",
+        "wind_direction_10m_dominant",
+        "pressure_msl_mean",
+        "relative_humidity_2m_mean",
+        "cloud_cover_mean",
+        "shortwave_radiation_sum",
+        "et0_fao_evapotranspiration",
+        "latitude",
+        "longitude",
+        # extreme event flags
+        "heatwave_flag",
+        "extreme_rainfall",
+        "cyclonic_flag",
+        # pipeline metadata
+        "batch_id",
+        "ingested_at",
+    }
+
     def upload_weather_data(self, df: pd.DataFrame, batch_id: int) -> int:
         """Upsert weather data rows into Supabase.
 
         Uses the city+time unique constraint so re-runs are safe.
+        Only columns matching the ``weather_data`` table schema are sent.
         Returns the number of rows upserted.
         """
         client = self._get_client()
 
-        # Convert datetime-like columns to ISO strings for JSON serialization
-        df = df.copy()
-        for col in df.select_dtypes(include=["datetime64", "datetimetz"]):
-            df[col] = df[col].apply(lambda x: x.isoformat() if pd.notna(x) else None)
+        import json as _json
 
-        # Replace NaN / NaT with None — JSON cannot encode these
-        df = df.where(pd.notna(df), None)
+        # Use pandas' JSON encoder which handles NaN→null and Timestamp→ISO string
+        records = _json.loads(df.to_json(orient="records", date_format="iso"))
 
-        records = df.to_dict(orient="records")
-
-        # Add batch metadata
+        # Filter to known table columns and add batch metadata
         for r in records:
+            for k in list(r.keys()):
+                if k not in self._SUPABASE_WEATHER_COLS:
+                    r.pop(k)
             r["batch_id"] = str(batch_id)
 
         # Upsert in chunks to avoid payload limits
@@ -252,8 +283,10 @@ _SCHEMA_SQL = """
 -- Weather data from Open-Meteo archive API
 CREATE TABLE IF NOT EXISTS weather_data (
     id BIGSERIAL PRIMARY KEY,
+    -- Identifiers
     city TEXT NOT NULL,
     time TIMESTAMPTZ NOT NULL,
+    -- Raw weather columns
     temperature_2m_max DOUBLE PRECISION,
     temperature_2m_min DOUBLE PRECISION,
     temperature_2m_mean DOUBLE PRECISION,
@@ -271,9 +304,44 @@ CREATE TABLE IF NOT EXISTS weather_data (
     et0_fao_evapotranspiration DOUBLE PRECISION,
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
+    -- Extreme event flags
     heatwave_flag INTEGER DEFAULT 0,
+    severe_heatwave_flag INTEGER DEFAULT 0,
     extreme_rainfall INTEGER DEFAULT 0,
+    heavy_rainfall INTEGER DEFAULT 0,
     cyclonic_flag INTEGER DEFAULT 0,
+    -- Engineered weather features
+    temp_max DOUBLE PRECISION,
+    temp_min DOUBLE PRECISION,
+    temp_mean DOUBLE PRECISION,
+    precipitation DOUBLE PRECISION,
+    month INTEGER,
+    dayofyear INTEGER,
+    month_sin DOUBLE PRECISION,
+    month_cos DOUBLE PRECISION,
+    -- Lag features
+    temp_max_lag_1 DOUBLE PRECISION,
+    temp_max_lag_3 DOUBLE PRECISION,
+    temp_max_lag_7 DOUBLE PRECISION,
+    temp_min_lag_1 DOUBLE PRECISION,
+    temp_min_lag_3 DOUBLE PRECISION,
+    temp_min_lag_7 DOUBLE PRECISION,
+    precipitation_lag_1 DOUBLE PRECISION,
+    precipitation_lag_3 DOUBLE PRECISION,
+    precipitation_lag_7 DOUBLE PRECISION,
+    wind_speed_10m_max_lag_1 DOUBLE PRECISION,
+    wind_speed_10m_max_lag_3 DOUBLE PRECISION,
+    wind_speed_10m_max_lag_7 DOUBLE PRECISION,
+    -- Rolling statistics
+    temp_max_roll_mean_3 DOUBLE PRECISION,
+    temp_max_roll_mean_7 DOUBLE PRECISION,
+    temp_max_roll_std_3 DOUBLE PRECISION DEFAULT 0,
+    temp_max_roll_std_7 DOUBLE PRECISION DEFAULT 0,
+    precipitation_roll_mean_3 DOUBLE PRECISION,
+    precipitation_roll_mean_7 DOUBLE PRECISION,
+    precipitation_roll_std_3 DOUBLE PRECISION DEFAULT 0,
+    precipitation_roll_std_7 DOUBLE PRECISION DEFAULT 0,
+    -- Pipeline metadata
     batch_id TEXT,
     ingested_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(city, time)
