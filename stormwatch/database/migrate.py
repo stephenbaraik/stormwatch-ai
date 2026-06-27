@@ -118,11 +118,10 @@ def _tables_exist(client: SupabaseClient) -> bool:
             .limit(1)
             .execute()
         )
-        if result.data is not None:
-            return True
-    except Exception:
-        pass
-    return False
+        return result.data is not None
+    except Exception as exc:
+        log.warning("Table existence check failed: %s", exc)
+        return False
 
 
 def migrate() -> bool:
