@@ -59,3 +59,4 @@ docker/data/
 
 # OS temp files
 *.tmp
+.openmeteo_cache.sqlite
