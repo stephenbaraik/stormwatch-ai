@@ -111,15 +111,14 @@ def apply_via_pooler(client: SupabaseClient) -> bool:
 def _tables_exist(client: SupabaseClient) -> bool:
     """Check if the required DB tables already exist via the REST API."""
     try:
-        raw = (
+        result = (
             client._get_client()
             .table("download_batches")
-            .select("id", count="exact")
-            .limit(0)
+            .select("id")
+            .limit(1)
             .execute()
         )
-        if hasattr(raw, "count") and raw.count is not None:
-            log.info("Tables already exist — skipping migration.")
+        if result.data is not None:
             return True
     except Exception:
         pass
