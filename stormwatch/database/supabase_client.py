@@ -73,19 +73,28 @@ class SupabaseClient:
     # ── Schema management ──
 
     def ensure_tables(self) -> bool:
-        """Create the required tables if they don't exist.
+        """Check that required tables exist; schema must be applied manually.
 
-        Safe to call repeatedly — uses IF NOT EXISTS.
-        Tries multiple approaches:
-          1. exec_sql RPC (if the function exists in Supabase)
-          2. Direct Postgres connection via SUPABASE_DB_URL
-          3. Connection pooler with JWT auth
-
-        Returns True if schema was applied successfully, False otherwise.
+        Run the SQL in stormwatch/database/schema.sql via Supabase SQL Editor
+        before running the pipeline for the first time.
         """
-        from stormwatch.database.migrate import migrate
-
-        return migrate()
+        try:
+            result = (
+                self._get_client()
+                .table("download_batches")
+                .select("id")
+                .limit(1)
+                .execute()
+            )
+            if result.data is not None:
+                return True
+        except Exception:
+            pass
+        log.warning(
+            "Tables not found. Run stormwatch/database/schema.sql "
+            "in your Supabase SQL Editor before running the pipeline."
+        )
+        return False
 
     # ── Batch tracking ──
 
