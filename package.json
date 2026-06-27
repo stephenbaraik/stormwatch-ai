@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@samverschueren/stream-to-observable": "^0.3.1"
+  },
+  "devDependencies": {
+    "marked": "^18.0.5",
+    "puppeteer": "^25.2.1"
+  }
+}

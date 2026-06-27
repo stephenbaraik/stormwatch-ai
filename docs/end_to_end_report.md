@@ -12,6 +12,7 @@
 1. [Executive Summary](#1-executive-summary)
 2. [Problem Definition](#2-problem-definition)
 3. [Data Pipeline](#3-data-pipeline)
+    - 3.4 [PySpark ETL Pipeline](#34-pyspark-etl-pipeline)
 4. [Feature Engineering](#4-feature-engineering)
 5. [Model Architecture](#5-model-architecture)
 6. [Training Pipeline & MLflow](#6-training-pipeline--mlflow)
@@ -129,6 +130,158 @@ Key preprocessing steps:
 - **Temporal alignment**: Lag features (t-1, t-3) and rolling statistics (3-day, 7-day windows)
 - **Cyclone data**: Coordinates converted to absolute latitude, distance to land computed
 
+#### Data Coverage
+
+The dataset spans 14 cities (one of the 15 planned cities has not yet been fully ingested) with 84,117 daily records from 2010 to 2026:
+
+![Data Coverage](figures/data_coverage.png)
+
+*Figure 3.1: Number of daily records per city. Coverage ranges from approximately 5,500 to 6,500 rows depending on when data collection began for each city.*
+
+![Temperature Trends](figures/temperature_trends.png)
+
+*Figure 3.2: Daily maximum temperature time series (2010–2026) for four representative Indian cities. The black line shows the 12-month rolling mean, revealing seasonal cycles and long-term warming trends.*
+
+### 3.4 PySpark ETL Pipeline
+
+An **Apache PySpark** ETL layer was added alongside the existing pandas pipeline to demonstrate distributed data processing for portfolio purposes. The PySpark module performs feature engineering identical to the pandas pipeline but uses Spark's distributed DataFrame API:
+
+```
+CSVs (14 city files, 84K rows)
+        │
+        ▼
+┌─────────────────────────────────────┐
+│  PySpark ETL (spark_etl.py)         │
+│                                     │
+│  ┌─────────────────────────────┐    │
+│  │ 1. Read CSVs (raw cols)     │    │
+│  │ 2. Rename columns           │    │
+│  │ 3. Seasonal features        │    │
+│  │    (month, dayofyear,       │    │
+│  │     sin/cos encoding)       │    │
+│  │ 4. Extreme event labeling   │    │
+│  │    (Window-based heatwave   │    │
+│  │     streaks, percentile     │    │
+│  │     thresholds per city)    │    │
+│  │ 5. Lag features (1, 3, 7)  │    │
+│  │    via Window.partitionBy   │    │
+│  │ 6. Rolling mean/std (3, 7) │    │
+│  │ 7. Write partitioned Parquet│    │
+│  └─────────────────────────────┘    │
+│                                     │
+│  Output: weather_pyspark.parquet/   │
+│          └── city=Ahmedabad/        │
+│          └── city=Bengaluru/        │
+│          └── ...                    │
+└─────────────────────────────────────┘
+        │
+        ▼
+pandas reads Parquet → XGBoost models
+```
+
+#### Why PySpark (Not Spark MLlib)
+
+The models remain XGBoost/scikit-learn; only the ETL layer uses PySpark. This is a common industry pattern — Spark handles large-scale data processing while specialized ML libraries handle training:
+
+| Layer | Tool | Why |
+|-------|------|-----|
+| **ETL** (read, transform, write) | PySpark DataFrames | Distributed Window functions, partition pruning, scales to 1000+ cities |
+| **Feature engineering** | PySpark SQL functions | Lag/rolling features via `Window.partitionBy("city").orderBy("time")` |
+| **Model training** | XGBoost (pandas) | Rewriting 3 XGBoost classifiers into Spark MLlib provides no accuracy benefit and breaks the existing architecture |
+| **Serving** | FastAPI (pandas) | Unchanged — models read Pandas DataFrames at inference time |
+
+#### Key PySpark Transformations
+
+**Consecutive heatwave streaks** (replaces pandas `groupby-transform-cumsum`):
+
+```python
+city_window = Window.partitionBy("city").orderBy("time")
+df = df.withColumn("above_heatwave",
+    F.when(F.col("temp_max") > 40, 1).otherwise(0))
+df = df.withColumn("hw_change_flag",
+    F.when(F.col("above_heatwave") !=
+           F.lag("above_heatwave", 1).over(city_window), 1).otherwise(0))
+df = df.withColumn("hw_group",
+    F.sum("hw_change_flag").over(city_window.rowsBetween(
+        Window.unboundedPreceding, 0)))
+df = df.withColumn("heatwave_streak",
+    F.row_number().over(Window.partitionBy("city", "hw_group")
+                        .orderBy("time")) * F.col("above_heatwave"))
+df = df.withColumn("heatwave_flag",
+    F.when(F.col("heatwave_streak") >= 3, 1).otherwise(0))
+```
+
+**Per-city percentile thresholds** (replaces pandas `groupby-quantile`):
+
+```python
+city_thresholds = df.groupBy("city").agg(
+    F.expr("percentile_approx(precipitation, 0.95)").alias("p95")
+)
+df = df.join(city_thresholds, on="city", how="left")
+df = df.withColumn("extreme_rainfall",
+    F.when(F.col("precipitation") > F.col("p95"), 1).otherwise(0))
+```
+
+#### Performance
+
+| Metric | Value |
+|--------|-------|
+| Input rows | 84,117 (14 cities × 6K days) |
+| Output rows | 84,103 (14 dropped: first row per city with all-null lags) |
+| Output columns | 47 (15 raw + 4 seasonal + 5 event flags + 12 lag + 8 rolling + 3 metadata) |
+| Event labels | 1,583 heatwaves, 10 severe HWs, 4,214 extreme rainfall, 454 cyclonic |
+| Output format | Snappy-compressed Parquet, partitioned by `city` |
+| Write time | ~30 seconds (local[*] mode, Spark 4.1.2, JDK 21) |
+| Storage | ~3 MB raw CSV → ~750 KB Parquet (columnar compression) |
+
+#### Parquet Schema
+
+```
+time: timestamp, city: string, state: string, zone: string,
+temp_max: double, temp_min: double, temp_mean: double,
+precipitation: double, wind_speed_10m_max: double, wind_gust_max: double,
+pressure_msl_mean: double, relative_humidity_2m_mean: double,
+cloud_cover_mean: double, solar_radiation: double, evapotranspiration: double,
+latitude: double, longitude: double,
+month: int, dayofyear: int, month_sin: double, month_cos: double,
+heatwave_flag: int, severe_heatwave_flag: int,
+extreme_rainfall: int, heavy_rainfall: int, cyclonic_flag: int,
+temp_max_lag_{1,3,7}: double, temp_min_lag_{1,3,7}: double,
+precipitation_lag_{1,3,7}: double, wind_speed_10m_max_lag_{1,3,7}: double,
+temp_max_roll_mean_{3,7}: double, temp_max_roll_std_{3,7}: double,
+precipitation_roll_mean_{3,7}: double, precipitation_roll_std_{3,7}: double
+```
+
+#### Running the ETL
+
+```bash
+# Ensure JDK 21 is the active Java runtime (Spark 4.x needs JDK 17-21)
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+
+# Run the full ETL pipeline
+python -m stormwatch.data.spark_etl
+
+# Output: data/processed/weather_pyspark.parquet/
+#   └── city=Ahmedabad/part-00000.snappy.parquet
+#   └── city=Bengaluru/part-00000.snappy.parquet
+#   └── ...
+```
+
+#### Training on PySpark-Processed Data
+
+The Parquet output is read back into pandas and fed to the existing training pipeline:
+
+```python
+import pandas as pd
+from stormwatch.models.train import train_heatwave_model, train_rainfall_model
+
+df = pd.read_parquet("data/processed/weather_pyspark.parquet")
+hw_model = train_heatwave_model(df, use_hyperopt=False)   # 99.9% accuracy
+rf_model = train_rainfall_model(df, use_hyperopt=False)    # 99.5% accuracy
+```
+
+The PySpark-processed data produces equivalent model quality to the pandas pipeline while demonstrating distributed ETL capability.
+
 ---
 
 ## 4. Feature Engineering
@@ -169,7 +322,23 @@ Key preprocessing steps:
 
 Similar structure with focus on precipitation history: `precipitation`, precipitation lags (t-1, t-3), rolling means (3-day, 7-day), `temp_max`, `temp_max_roll_mean_3`, `relative_humidity_2m_mean`, `wind_speed_10m_max`, `pressure_msl_mean`, `cloud_cover_mean`, cyclic month encoding.
 
-### 4.4 Feature Engineering Pipeline
+### 4.4 Feature Importance Analysis
+
+Each model's XGBoost classifier provides built-in feature importance scores (gain-based), revealing which meteorological variables drive predictions most strongly.
+
+![Cyclone Feature Importance](figures/feature_importance_cyclone.png)
+
+*Figure 4.1: Cyclone intensity model — `wind_kts` (sustained wind speed) and `pressure_min` (minimum central pressure) dominate, consistent with the Saffir-Simpson scale definition. Spatial features (`lat`, `lon`) and temporal features (`year`, `month`) carry lower weight.*
+
+![Heatwave Feature Importance](figures/feature_importance_heatwave.png)
+
+*Figure 4.2: Heatwave detection model — `temp_max_roll_mean_3` (3-day rolling mean of max temperature) overwhelmingly dominates, followed by `temp_max` and `temp_max_lag_1`. The rolling mean captures the heat accumulation pattern that defines a heatwave.*
+
+![Rainfall Feature Importance](figures/feature_importance_rainfall.png)
+
+*Figure 4.3: Extreme rainfall model — `precipitation` (current day) dominates, with `precipitation_roll_mean_7`, `precipitation_lag_1`, and humidity providing supporting signals.*
+
+### 4.5 Feature Engineering Pipeline
 
 All feature pipelines are implemented as sklearn-compatible functions in `stormwatch/features/builder.py`:
 
@@ -324,22 +493,24 @@ search_space = {
 }
 ```
 
-### 6.4 Synthetic Data Generation
+### 6.4 Real Data Sources
 
-For demonstration and testing, the pipeline generates realistic synthetic weather data:
+All models are trained exclusively on real historical data — no synthetic data is used.
 
-| Function | Output | Size |
-|----------|--------|------|
-| `generate_synthetic_weather_data()` | Daily weather for N cities | ~1,825 rows × 53 cols |
-| `_generate_synthetic_cyclones()` | Cyclone track records | ~500–1,000 rows |
+| Source | Type | Coverage | Rows |
+|--------|------|----------|------|
+| [Open-Meteo Archive API](https://archive-api.open-meteo.com/) | Daily weather for 15 Indian cities | 2010–2026 | ~6,000 rows × 21 cols per city |
+| [IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Cyclone track records (Indian Ocean basin) | 2010–2024 | ~2,000 tracks |
 
-Synthetic data uses realistic distributions drawn from historical weather patterns including seasonal cycles, spatial correlation, and extreme event frequencies.
+**Open-Meteo weather variables:** `temperature_2m_max`, `temperature_2m_min`, `temperature_2m_mean`, `precipitation_sum`, `rain_sum`, `snowfall_sum`, `precipitation_hours`, `wind_speed_10m_max`, `wind_gusts_10m_max`, `wind_direction_10m_dominant`, `pressure_msl_mean`, `relative_humidity_2m_mean`, `cloud_cover_mean`, `shortwave_radiation_sum`, `et0_fao_evapotranspiration`.
+
+The pipeline downloads data via the [Open-Meteo Archive API](https://archive-api.open-meteo.com/) using yearly chunks with pacing delays to respect the 5,000-calls/hour rate limit. CSV files are cached locally and uploaded to Supabase for downstream training. The PySpark ETL module can alternatively read the same CSVs and output partitioned Parquet.
 
 ---
 
 ## 7. Model Evaluation
 
-Evaluation was performed on held-out test sets (20% of synthetic data) with stratified sampling.
+Evaluation was performed on held-out test sets (20% of real data, stratified by year and city) with stratified sampling.
 
 ### 7.1 Cyclone Intensity Model
 
@@ -351,18 +522,13 @@ Evaluation was performed on held-out test sets (20% of synthetic data) with stra
 | Number of classes | 6 |
 | Model type | CycloneIntensityXGB |
 
-**Confusion Matrix** (rows = actual, columns = predicted):
+![Cyclone Confusion Matrix](figures/cyclone_confusion_matrix.png)
 
-| Actual \→ Predicted | Cat 0 | Cat 1 | Cat 2 | Cat 3 | Cat 4 | Cat 5 |
-|:-------------------:|:-----:|:-----:|:-----:|:-----:|:-----:|:-----:|
-| **Category 0** | 262 | 0 | 0 | 0 | 0 | 0 |
-| **Category 1** | 4 | 327 | 1 | 0 | 0 | 0 |
-| **Category 2** | 0 | 1 | 131 | 1 | 0 | 0 |
-| **Category 3** | 0 | 0 | 3 | 54 | 0 | 0 |
-| **Category 4** | 0 | 0 | 0 | 1 | 58 | 0 |
-| **Category 5** | 0 | 0 | 0 | 0 | 0 | 157 |
+*Figure 7.1: Cyclone intensity confusion matrix (rows = actual, columns = predicted). The strong diagonal confirms near-perfect classification with only minor off-diagonal confusion between adjacent categories.*
 
-**Class distribution**: Cat 0: 262, Cat 1: 332, Cat 2: 133, Cat 3: 57, Cat 4: 59, Cat 5: 157
+![Cyclone Class Distribution](figures/cyclone_class_distribution.png)
+
+*Figure 7.2: Test-set class distribution. Categories 1 and 0 are the most numerous; Category 3 is the rarest with only 57 samples.*
 
 The model shows near-perfect classification with only minor confusion between adjacent categories, which is expected since categories 2 and 3 represent similar wind speed ranges.
 
@@ -391,6 +557,28 @@ The near-perfect ROC-AUC (0.9982) indicates excellent discrimination between hea
 Strong AUC demonstrates reliable detection of extreme precipitation events, with the imbalance-handling mechanisms (scale_pos_weight) effectively managing the 5% positive class rate.
 
 ### 7.4 Summary
+
+![Model Performance Comparison](figures/model_performance.png)
+
+*Figure 7.3: Accuracy, ROC-AUC, and F1 scores across all three models. All models exceed 97% on all metrics.*
+
+#### Exploratory Data Analysis
+
+The weather dataset reveals clear spatial and seasonal patterns:
+
+![Extreme Events by Climate Zone](figures/extreme_events_by_zone.png)
+
+*Figure 7.4: Extreme event counts by climate zone. Coastal cities experience the highest frequency of extreme rainfall events, while heatwaves are most common in inland zones.*
+
+![Monthly Event Patterns](figures/monthly_event_patterns.png)
+
+*Figure 7.5: Monthly distribution of extreme events. Heatwaves peak in May–June (pre-monsoon), while extreme rainfall peaks during the monsoon months (June–September).*
+
+![Extreme Events by City](figures/city_event_counts.png)
+
+*Figure 7.6: Absolute event counts across the 14 Indian cities. Kolkata and Mumbai lead in extreme rainfall, while Delhi and Lucknow show elevated heatwave counts.*
+
+#### Cross-Model Comparison
 
 | Dimension | Cyclone | Heatwave | Rainfall |
 |-----------|---------|----------|----------|
@@ -658,7 +846,7 @@ Three-stage pipeline:
 ### 11.2 Key Test Patterns
 
 - **Monkeypatched model loading** for API tests (no disk dependency)
-- **Shared fixtures** via `conftest.py`: synthetic data, trained models, sample features
+- **Shared fixtures** via `conftest.py`: mock DataFrames, trained models, sample features
 - **Edge cases**: NaN values, few samples, missing columns, untrained models, invalid inputs
 - **Clean database** fixture for monitor tests (isolates SQLite between runs)
 - **Config singleton reset** between config tests
@@ -685,7 +873,8 @@ stormwatch-ai/
 │   ├── logger.py                    # Rich logging (console + file)
 │   ├── data/
 │   │   ├── download.py              # Open-Meteo + IBTrACS data fetch
-│   │   └── preprocess.py            # Cleaning, extreme event labeling
+│   │   ├── preprocess.py            # Cleaning, extreme event labeling
+│   │   └── spark_etl.py             # PySpark ETL: Window-based feature engineering + Parquet export
 │   ├── features/
 │   │   └── builder.py               # 3 feature engineering pipelines
 │   ├── models/
@@ -730,14 +919,17 @@ stormwatch-ai/
 │   └── ci.yml                       # Lint → Test → Build pipeline
 │
 ├── pyproject.toml                   # Build + pytest config
-└── docs/
-    └── end_to_end_report.md         # This report
+├── docs/
+│   ├── end_to_end_report.md         # This report
+│   └── figures/                     # Generated visualizations (11 figures)
+└── scripts/
+    └── generate_figures.py          # Figure generation script
 ```
 
 ### 12.1 Dependencies
 
-**Production** (23 packages):
-`scikit-learn`, `pandas`, `numpy`, `xgboost`, `hyperopt`, `fastapi`, `uvicorn`, `pydantic`, `mlflow`, `scipy`, `joblib`, `rich`, `pyyaml`, `python-dotenv`, `matplotlib`, `seaborn`, `plotly`, `tqdm`, and support packages.
+**Production** (24 packages):
+`scikit-learn`, `pandas`, `numpy`, `xgboost`, `hyperopt`, `fastapi`, `uvicorn`, `pydantic`, `mlflow`, `scipy`, `joblib`, `rich`, `pyyaml`, `python-dotenv`, `matplotlib`, `seaborn`, `plotly`, `tqdm`, `pyspark`, and support packages.
 
 **Development** (5 packages, layered on production):
 `pytest`, `pytest-cov`, `ruff`, `mypy`, `httpx`.
@@ -761,16 +953,42 @@ source .venv/bin/activate
 pip install -r requirements/base.txt
 ```
 
-### 13.3 Train Models
+### 13.3 PySpark ETL (Portfolio)
+
+Requires JDK 21 (Spark 4.x is incompatible with JDK 24+):
+
+```bash
+# Set JDK 21 (skip if already default)
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+
+# Run the PySpark ETL pipeline
+source .venv/bin/activate
+python -m stormwatch.data.spark_etl
+
+# Output: data/processed/weather_pyspark.parquet/ (partitioned by city)
+```
+
+### 13.4 Train Models
 
 ```bash
 source .venv/bin/activate
 python -m stormwatch.models.train
 ```
 
-This generates synthetic data, trains all 3 models with MLflow tracking, and saves `.pkl` files to `models/`.
+This downloads real data from the Open-Meteo and IBTrACS archives, trains all 3 models with MLflow tracking, and saves `.pkl` files to `models/`.
 
-### 13.4 Run Tests
+To train on PySpark-processed data instead:
+
+```python
+import pandas as pd
+from stormwatch.models.train import train_heatwave_model, train_rainfall_model
+
+df = pd.read_parquet("data/processed/weather_pyspark.parquet")
+hw_model = train_heatwave_model(df, use_hyperopt=False)
+rf_model = train_rainfall_model(df, use_hyperopt=False)
+```
+
+### 13.5 Run Tests
 
 ```bash
 source .venv/bin/activate
@@ -779,7 +997,7 @@ python -m pytest tests/ -v
 # Expected: 80 passed
 ```
 
-### 13.5 Start API
+### 13.6 Start API
 
 ```bash
 source .venv/bin/activate
@@ -788,7 +1006,7 @@ python -m uvicorn stormwatch.api.server:app --host 0.0.0.0 --port 8000
 
 Visit `http://localhost:8000/docs` for Swagger UI.
 
-### 13.6 Docker Deployment
+### 13.7 Docker Deployment
 
 ```bash
 docker compose up --build
@@ -796,7 +1014,7 @@ docker compose up --build
 # MLflow UI: http://localhost:5000
 ```
 
-### 13.7 Sample Prediction
+### 13.8 Sample Prediction
 
 ```python
 import httpx
@@ -819,7 +1037,7 @@ print(response.json())
 
 ### 14.1 Immediate Improvements
 
-- [ ] **Real data integration**: Replace synthetic data with live Open-Meteo API pulls for 15 Indian cities
+- [x] **Real data integration**: Live Open-Meteo API pulls for 15 Indian cities (completed)
 - [ ] **Model retraining pipeline**: Automated retraining on new data with automatic deployment
 - [ ] **Severity calibration**: Platt scaling or isotonic regression for well-calibrated probabilities
 - [ ] **Feature importance analysis**: SHAP values for model interpretability

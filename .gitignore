@@ -60,3 +60,10 @@ docker/data/
 # OS temp files
 *.tmp
 .openmeteo_cache.sqlite
+
+# Node.js
+node_modules/
+
+# Generated docs
+docs/end_to_end_report.pdf
+docs/_report_temp.html
