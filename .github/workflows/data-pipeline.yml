@@ -41,8 +41,9 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
-          python -m stormwatch.data.pipeline \
+          python -u -m stormwatch.data.pipeline \
             --start-date "${{ inputs.start_date || '2010-01-01' }}" \
             ${{ inputs.full_refresh && '--force' || '' }}
 
