@@ -161,7 +161,7 @@ class SupabaseClient:
         "id",
         "city",
         "time",
-        # raw weather columns
+        # raw Open-Meteo columns
         "temperature_2m_max",
         "temperature_2m_min",
         "temperature_2m_mean",
@@ -179,10 +179,6 @@ class SupabaseClient:
         "et0_fao_evapotranspiration",
         "latitude",
         "longitude",
-        # extreme event flags
-        "heatwave_flag",
-        "extreme_rainfall",
-        "cyclonic_flag",
         # pipeline metadata
         "batch_id",
         "ingested_at",
