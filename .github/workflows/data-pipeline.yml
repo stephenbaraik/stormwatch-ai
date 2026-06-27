@@ -37,6 +37,32 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Diagnostic — check imports and connectivity
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          echo "=== Python version ==="
+          python --version
+          echo "=== Checking imports ==="
+          python -c "import sys; print('sys.path:', sys.path[:3])"
+          python -c "
+          import logging
+          logging.basicConfig(level=logging.INFO, stream=sys.stderr, force=True)
+          logging.info('STDOUT test: logging works')
+          print('PRINT test: print works', flush=True)
+          "
+          echo "=== Checking external connectivity ==="
+          curl -s -o /dev/null -w "Open-Meteo API: HTTP %{http_code} (%{time_total}s)\n" \
+            "https://api.open-meteo.com/v1/forecast?latitude=19.076&longitude=72.8777&current=temperature_2m" || \
+            echo "Open-Meteo API: FAILED"
+          curl -s -o /dev/null -w "Supabase API: HTTP %{http_code} (%{time_total}s)\n" \
+            "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" || \
+            echo "Supabase API: FAILED"
+          echo "=== Diagnostics complete ==="
+
       - name: Run data pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
