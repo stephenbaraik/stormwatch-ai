@@ -1,0 +1,98 @@
+# StormWatch AI - Configuration
+project:
+  name: "StormWatch AI"
+  version: "1.0.0"
+  description: "Extreme Weather Early Warning System"
+
+data:
+  raw_path: "data/raw"
+  processed_path: "data/processed"
+  external_path: "data/external"
+
+  # Open-Meteo free weather API (no key required)
+  openmeteo:
+    start_date: "2010-01-01"
+    timezone: "Asia/Kolkata"
+    retry_attempts: 3
+    retry_delay_seconds: 10
+    city_delay_seconds: 20
+    chunk_delay_seconds: 5.0
+
+  # IBTrACS cyclone data (NOAA)
+  ibtracs:
+    url: "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.IO.list.v04r01.csv"
+    filename: "ibtracs_cyclones.csv"
+    basin: "IO"  # Indian Ocean
+
+  # IMD datasets
+  imd:
+    rainfall_url: ""  # IMD gridded rainfall data
+    temp_url: ""      # IMD gridded temperature data
+
+features:
+  cyclone:
+    - "lat"
+    - "lon"
+    - "wind_max"
+    - "pressure_min"
+    - "year"
+    - "month"
+    - "lat_abs"
+    - "wind_gust"
+    - "pressure_trend"
+    - "wind_trend"
+
+models:
+  cyclone_intensity:
+    type: "multiclass"
+    target: "category"
+    classes: [0, 1, 2, 3, 4, 5]
+    test_size: 0.2
+    random_state: 42
+    hyperopt_evals: 50
+
+  heatwave_prediction:
+    type: "binary"
+    target: "heatwave_occurred"
+    test_size: 0.2
+    random_state: 42
+    hyperopt_evals: 50
+
+  extreme_rainfall:
+    type: "binary"
+    target: "extreme_rainfall"
+    test_size: 0.2
+    random_state: 42
+    hyperopt_evals: 50
+
+training:
+  mlflow_tracking_uri: "sqlite:///mlflow/mlflow.db"
+  experiment_name: "stormwatch-ai"
+  cv_folds: 5
+  metrics:
+    - "accuracy"
+    - "precision"
+    - "recall"
+    - "f1"
+    - "roc_auc"
+    - "log_loss"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  title: "StormWatch AI API"
+  version: "1.0.0"
+  model_path: "models/"
+
+monitoring:
+  drift_detection_interval: 7  # days
+  alert_channels:
+    - "console"
+  reference_window: 30  # days
+  metrics:
+    - "data_drift"
+    - "model_performance"
+
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

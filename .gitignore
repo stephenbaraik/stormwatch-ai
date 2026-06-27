@@ -1,0 +1,61 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.so
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Virtual environment
+.venv/
+venv/
+.venv
+
+# Data - keep directory structure, ignore actual data files
+data/raw/*
+data/processed/*
+data/external/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/external/.gitkeep
+
+# Model binaries
+models/*
+!models/.gitkeep
+
+# MLflow tracking artifacts
+mlflow/*
+!mlflow/.gitkeep
+mlruns/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment & secrets
+.env
+*.log
+logs/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Docker runtime data
+docker/data/
+
+# OS temp files
+*.tmp
