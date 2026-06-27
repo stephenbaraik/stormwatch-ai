@@ -120,7 +120,7 @@ def _tables_exist(client: SupabaseClient) -> bool:
         )
         return result.data is not None
     except Exception as exc:
-        log.warning("Table existence check failed: %s", exc)
+        log.warning("Table existence check failed: [%s] %s", type(exc).__name__, exc)
         return False
 
 
