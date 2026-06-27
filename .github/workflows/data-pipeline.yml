@@ -46,8 +46,9 @@ jobs:
           echo "=== Python version ==="
           python --version
           echo "=== Checking imports ==="
-          python -c "import sys; print('sys.path:', sys.path[:3])"
           python -c "
+          import sys
+          print('sys.path:', sys.path[:3])
           import logging
           logging.basicConfig(level=logging.INFO, stream=sys.stderr, force=True)
           logging.info('STDOUT test: logging works')
