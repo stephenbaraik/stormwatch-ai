@@ -37,6 +37,9 @@ pipeline-force:
 monitor:
 	python -m stormwatch.monitor.drift
 
+pipeline-status:
+	python -m stormwatch.monitor.pipeline_status
+
 lint:
 	ruff check stormwatch/ tests/
 	mypy stormwatch/
