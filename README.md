@@ -6,6 +6,12 @@ StormWatch AI downloads **real weather data** from the [Open-Meteo Archive API](
 
 **No synthetic data.** Every prediction is backed by 16+ years of historical meteorological records.
 
+| Model | Task | Accuracy | ROC-AUC |
+|-------|------|----------|---------|
+| **Cyclone Intensity** | Saffir-Simpson category (0–5) | **98.9%** | — |
+| **Heatwave Detection** | Heatwave flag (binary) | **99.4%** | **0.9982** |
+| **Extreme Rainfall** | 95th percentile exceedance (binary) | **97.5%** | **0.9744** |
+
 ---
 
 ## Table of Contents
@@ -14,6 +20,7 @@ StormWatch AI downloads **real weather data** from the [Open-Meteo Archive API](
 - [Models](#models)
 - [Cities Covered](#cities-covered)
 - [Data Pipeline](#data-pipeline)
+- [PySpark ETL](#pyspark-etl)
 - [API](#api)
 - [Setup](#setup)
 - [Usage](#usage)
@@ -38,13 +45,13 @@ Open-Meteo Archive API
 │  5s/chunk delay  │     │  batches     │     │  heatwave        │
 │  20s/city delay  │     │              │     │  extreme_rainfall│
 └──────────────────┘     └──────────────┘     └──────────────────┘
-                                                       │
-                                                       ▼
-                                              ┌──────────────────┐
-                                              │  FastAPI Server  │
-                                              │  /predict/*      │
-                                              │  /monitor/drift  │
-                                              │  /health         │
+        │                                              │
+        ▼                                              ▼
+┌──────────────────┐                          ┌──────────────────┐
+│  PySpark ETL     │                          │  FastAPI Server  │
+│  Window functions│                          │  /predict/*      │
+│  Parquet output  │                          │  /monitor/drift  │
+└──────────────────┘                          │  /health         │
                                               └──────────────────┘
 ```
 
@@ -153,6 +160,55 @@ Two tables in the `public` schema:
 
 ---
 
+## PySpark ETL
+
+An **Apache PySpark** ETL layer sits alongside the pandas pipeline, demonstrating distributed data processing. It reads the same city CSVs and produces partitioned Parquet output with identical feature engineering:
+
+```
+CSVs (14 cities, 84K rows)
+        │
+        ▼
+┌───────────────────────────────┐
+│  PySpark ETL (spark_etl.py)  │
+│  1. Read CSVs + rename cols  │
+│  2. Seasonal sin/cos encode  │
+│  3. Heatwave streak (Window) │
+│  4. Percentile thresholds    │
+│  5. Lag features (1, 3, 7)   │
+│  6. Rolling mean/std (3, 7)  │
+│  7. Write partitioned Parquet│
+└───────────────────────────────┘
+        │
+        ▼
+weather_pyspark.parquet/ (partitioned by city)
+```
+
+### Requirements
+
+- **JDK 21** (Spark 4.x is incompatible with JDK 24+)
+- PySpark (included in `requirements.txt`)
+
+### Running
+
+```bash
+export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+python -m stormwatch.data.spark_etl
+# Output: data/processed/weather_pyspark.parquet/
+```
+
+### Training on PySpark Output
+
+```python
+import pandas as pd
+from stormwatch.models.train import train_heatwave_model, train_rainfall_model
+
+df = pd.read_parquet("data/processed/weather_pyspark.parquet")
+hw_model = train_heatwave_model(df, use_hyperopt=False)
+rf_model = train_rainfall_model(df, use_hyperopt=False)
+```
+
+---
+
 ## API
 
 FastAPI server with interactive docs at `/docs`.
@@ -194,6 +250,8 @@ FastAPI server with interactive docs at `/docs`.
 
 - Python 3.13+
 - A [Supabase](https://supabase.com) project (free tier works)
+- JDK 21 (for PySpark ETL — optional)
+- Node.js 18+ (for PDF report generation — optional)
 - GitHub account (for Actions cron)
 
 ### Local Setup
@@ -292,21 +350,45 @@ Open [http://localhost:8000/docs](http://localhost:8000/docs) for the interactiv
 make monitor
 ```
 
+### Generate Report Figures
+
+```bash
+python scripts/generate_figures.py
+# Output: docs/figures/ (11 PNG visualizations)
+```
+
+### Generate PDF Report
+
+Converts the markdown report to a styled PDF with embedded figures:
+
+```bash
+npm install          # one-time: install marked + puppeteer
+node scripts/convert_to_pdf.mjs
+# Output: docs/end_to_end_report.pdf
+```
+
 ---
 
 ## Project Structure
 
 ```
 stormwatch-ai/
-├── .github/workflows/       # GitHub Actions cron (daily @ 2 AM IST)
-│   └── data-pipeline.yml
+├── .github/workflows/       # CI/CD
+│   ├── ci.yml               # Lint → Test → Docker build
+│   └── data-pipeline.yml    # Daily cron @ 2 AM IST
 ├── configs/
 │   └── config.yaml          # Runtime configuration
 ├── data/
-│   └── raw/                 # Downloaded CSV files (gitignored)
+│   ├── raw/                 # Downloaded CSV files (gitignored)
+│   └── processed/           # PySpark Parquet output (gitignored)
 ├── docs/
-│   └── end_to_end_report.md
+│   ├── end_to_end_report.md # Full ML report (1000+ lines)
+│   └── figures/             # 11 generated visualizations
 ├── models/                  # Trained model pickles (gitignored)
+├── scripts/
+│   ├── convert_to_pdf.mjs   # Markdown → PDF (Puppeteer)
+│   ├── generate_figures.py  # Report figure generation
+│   └── check_supabase.py    # Supabase connectivity check
 ├── stormwatch/              # Main package
 │   ├── api/                 # FastAPI server + request/response schemas
 │   │   ├── schemas.py
@@ -314,7 +396,8 @@ stormwatch-ai/
 │   ├── data/                # Data pipeline
 │   │   ├── download.py      # Open-Meteo + IBTrACS downloaders
 │   │   ├── pipeline.py      # Orchestrator (download → preprocess → upload)
-│   │   └── preprocess.py    # Extreme event labeling + feature engineering
+│   │   ├── preprocess.py    # Extreme event labeling + feature engineering
+│   │   └── spark_etl.py     # PySpark ETL: Window features + Parquet
 │   ├── database/            # Supabase client + schema
 │   │   ├── schema.sql
 │   │   └── supabase_client.py
@@ -330,19 +413,18 @@ stormwatch-ai/
 │   │   └── drift.py
 │   ├── config.py            # Pydantic-typed config loader
 │   └── logger.py            # Logging setup
-├── tests/                   # Test suite (80+ tests)
+├── tests/                   # Test suite (80 tests)
 │   ├── conftest.py
 │   ├── test_api.py
 │   ├── test_config.py
 │   ├── test_models.py
 │   └── test_monitor.py
 ├── .env.example             # Environment template
-├── .github/                 # CI/CD workflows
 ├── .gitignore
 ├── docker-compose.yml
 ├── Dockerfile
 ├── Makefile                 # Common commands
-├── opencode.json            # OpenCode MCP config
+├── package.json             # Node deps (marked, puppeteer)
 ├── pyproject.toml
 ├── README.md
 └── requirements.txt
@@ -440,7 +522,7 @@ The FastAPI server (`stormwatch.api.server:app`) can be deployed to any platform
 
 ## Monitoring
 
-The drift detection module uses [Evidently AI](https://evidentlyai.com) to compare production predictions against a reference window. Alerts fire when statistical drift is detected in model inputs or outputs.
+The drift detection module uses the **Kolmogorov-Smirnov two-sample test** (`scipy.stats.ks_2samp`) to compare recent predictions against a reference window. Alerts fire when ≥1/3 of features show statistically significant drift (p < 0.05).
 
 ```bash
 # Run drift check
@@ -449,6 +531,8 @@ python -m stormwatch.monitor.drift
 # Via API
 curl -X POST "http://localhost:8000/monitor/drift?model_name=cyclone"
 ```
+
+All predictions are logged to SQLite (`mlflow/monitor.db`) for drift analysis.
 
 ---
 
