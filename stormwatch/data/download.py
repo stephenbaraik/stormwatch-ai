@@ -356,7 +356,7 @@ def download_openmeteo_historical(
                     responses = client.weather_api(url, params=params)
                 except Exception as e2:
                     log.warning(
-                        "Chunk %s..%s still failed after rate-limit sleep: %s",
+                        "Chunk %s..%s still failed for lat=%s, lon=%s after rate-limit sleep: %s",
                         cs,
                         ce,
                         lat,

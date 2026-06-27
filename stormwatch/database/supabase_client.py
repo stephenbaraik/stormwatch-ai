@@ -153,6 +153,12 @@ class SupabaseClient:
         Returns the number of rows upserted.
         """
         client = self._get_client()
+
+        # Convert datetime-like columns to ISO strings for JSON serialization
+        df = df.copy()
+        for col in df.select_dtypes(include=["datetime64", "datetimetz"]):
+            df[col] = df[col].apply(lambda x: x.isoformat() if pd.notna(x) else None)
+
         records = df.to_dict(orient="records")
 
         # Add batch metadata
