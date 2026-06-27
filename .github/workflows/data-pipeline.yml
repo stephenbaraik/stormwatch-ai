@@ -37,6 +37,25 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Debug Supabase credentials
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "URL length: ${#SUPABASE_URL}"
+          echo "Key length: ${#SUPABASE_SERVICE_KEY}"
+          echo "URL prefix: ${SUPABASE_URL:0:20}..."
+          python3 -c "
+import os, requests
+url = os.environ['SUPABASE_URL']
+key = os.environ['SUPABASE_SERVICE_KEY']
+headers = {'apikey': key, 'Authorization': f'Bearer {key}', 'Accept': 'application/json'}
+r = requests.get(f'{url}/rest/v1/download_batches', params={'select': 'id', 'limit': 1}, headers=headers)
+print(f'download_batches status: {r.status_code}')
+r2 = requests.get(f'{url}/rest/v1/weather_data', params={'select': 'id', 'limit': 1}, headers=headers)
+print(f'weather_data status: {r2.status_code}')
+"
+
       - name: Run data pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
