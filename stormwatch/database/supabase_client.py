@@ -65,9 +65,19 @@ class SupabaseClient:
             raise RuntimeError(
                 "Supabase not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY."
             )
-        from supabase import create_client
+        from supabase import create_client, ClientOptions
+        import httpx
 
-        self._client = create_client(self._config.url, self._config.service_key)
+        # Short timeouts so the pipeline fails fast if Supabase is unreachable
+        options = ClientOptions(
+            httpx_client=httpx.Client(timeout=httpx.Timeout(15.0)),
+            postgrest_client_timeout=30,
+            storage_client_timeout=10,
+            function_client_timeout=10,
+        )
+        self._client = create_client(
+            self._config.url, self._config.service_key, options=options
+        )
         return self._client
 
     # ── Schema management ──
