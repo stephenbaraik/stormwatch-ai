@@ -169,6 +169,9 @@ class SupabaseClient:
         for col in df.select_dtypes(include=["datetime64", "datetimetz"]):
             df[col] = df[col].apply(lambda x: x.isoformat() if pd.notna(x) else None)
 
+        # Replace NaN / NaT with None — JSON cannot encode these
+        df = df.where(pd.notna(df), None)
+
         records = df.to_dict(orient="records")
 
         # Add batch metadata
