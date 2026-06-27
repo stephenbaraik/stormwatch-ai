@@ -19,24 +19,27 @@ setup:
 	. .venv/bin/activate && pip install -U pip && pip install -r requirements.txt
 
 data:
-	python -m src.data.download
-	python -m src.data.preprocess
+	python -m stormwatch.data.download
+	python -m stormwatch.data.preprocess
 
 train:
-	python -m src.train
+	python -m stormwatch.models.train
 
 api:
-	uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+	uvicorn stormwatch.api.server:app --reload --host 0.0.0.0 --port 8000
+
+pipeline:
+	python -m stormwatch.data.pipeline
 
 monitor:
-	python -m src.monitoring.drift_detection
+	python -m stormwatch.monitor.drift
 
 lint:
-	ruff check src/ tests/
-	mypy src/
+	ruff check stormwatch/ tests/
+	mypy stormwatch/
 
 test:
-	pytest tests/ -v --cov=src
+	pytest tests/ -v --cov=stormwatch
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null
