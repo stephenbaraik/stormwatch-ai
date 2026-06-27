@@ -1,6 +1,10 @@
 """
 StormWatch AI - Data Download Module
 Downloads IBTrACS cyclone tracks and Open-Meteo historical weather data.
+
+Uses the official openmeteo-requests client with:
+- requests-cache: local HTTP cache so repeated chunk requests are instant
+- retry-requests: automatic retry with exponential backoff on failures
 """
 
 from __future__ import annotations
@@ -13,16 +17,46 @@ import urllib.request
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
-import requests
 from tqdm import tqdm
 
 from stormwatch.config import get_config
 from stormwatch.logger import get_logger
 
 log = get_logger(__name__)
+
+# ──────────────────────────────────────────────
+#  Open-Meteo client singleton
+# ──────────────────────────────────────────────
+
+_OPENMETEO_CLIENT: Any = None
+
+
+def _get_openmeteo_client():
+    """Lazy-init the openmeteo-requests client with caching and retry."""
+    global _OPENMETEO_CLIENT
+    if _OPENMETEO_CLIENT is not None:
+        return _OPENMETEO_CLIENT
+
+    import openmeteo_requests
+    import requests_cache
+    from retry_requests import retry
+
+    cache_session = requests_cache.CachedSession(
+        ".openmeteo_cache",
+        expire_after=3600,           # cache valid for 1 hour
+    )
+    retry_session = retry(
+        cache_session,
+        retries=5,
+        backoff_factor=0.5,          # 0.5s, 1s, 2s, 4s, 8s
+    )
+    _OPENMETEO_CLIENT = openmeteo_requests.Client(session=retry_session)
+    return _OPENMETEO_CLIENT
+
 
 # ──────────────────────────────────────────────
 #  Indian cities for weather data
@@ -117,11 +151,23 @@ def download_ibtracs(
         return None
 
 
-def _year_chunks(start: str, end: str) -> List[tuple[str, str]]:
-    """Split a date range into year-sized chunks (Open-Meteo API-call accounting)."""
+# ──────────────────────────────────────────────
+#  Yearly chunking for Open-Meteo API accounting
+# ──────────────────────────────────────────────
+
+
+def _year_chunks(start: str, end: str) -> List[Tuple[str, str]]:
+    """Split a date range into year-sized chunks.
+
+    Open-Meteo charges API calls per-variable-per-day-per-location.
+    A 16-year request costs ~430 calls; yearly chunks cost ~39 each.
+    This keeps us well under the 5 000 calls/hour free-tier limit.
+    """
     s = datetime.strptime(start, "%Y-%m-%d")
     e = datetime.strptime(end, "%Y-%m-%d")
-    chunks: List[tuple[str, str]] = []
+    if s >= e:
+        return []
+    chunks: List[Tuple[str, str]] = []
     cursor = s
     while cursor < e:
         year_end = cursor.replace(month=12, day=31)
@@ -132,6 +178,29 @@ def _year_chunks(start: str, end: str) -> List[tuple[str, str]]:
     return chunks
 
 
+# ──────────────────────────────────────────────
+#  Weather variables requested from Open-Meteo
+# ──────────────────────────────────────────────
+
+DAILY_PARAMS = [
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "temperature_2m_mean",
+    "precipitation_sum",
+    "rain_sum",
+    "snowfall_sum",
+    "precipitation_hours",
+    "wind_speed_10m_max",
+    "wind_gusts_10m_max",
+    "wind_direction_10m_dominant",
+    "pressure_msl_mean",
+    "relative_humidity_2m_mean",
+    "cloud_cover_mean",
+    "shortwave_radiation_sum",
+    "et0_fao_evapotranspiration",
+]
+
+
 def download_openmeteo_historical(
     lat: float,
     lon: float,
@@ -140,8 +209,10 @@ def download_openmeteo_historical(
 ) -> Optional[pd.DataFrame]:
     """Download historical weather data from Open-Meteo Archive API.
 
-    Splits the date range into yearly chunks internally to avoid Open-Meteo's
-    fractional API-call multiplier for long ranges.
+    Uses the official ``openmeteo-requests`` client with:
+    - Local HTTP cache (repeat chunk requests return instantly)
+    - Automatic retry with exponential backoff (5 retries, 0.5× factor)
+    - Yearly chunking to avoid the fractional API-call multiplier
 
     Args:
         lat: Latitude
@@ -150,7 +221,7 @@ def download_openmeteo_historical(
         end_date: End date (YYYY-MM-DD, defaults to yesterday)
 
     Returns:
-        DataFrame with daily weather data, or None on failure.
+        DataFrame with daily weather data + lat/lon, or None on failure.
     """
     config = get_config()
     start_date = start_date or config.data.openmeteo.start_date
@@ -158,26 +229,13 @@ def download_openmeteo_historical(
         end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     chunks = _year_chunks(start_date, end_date)
-    daily_params = [
-        "temperature_2m_max",
-        "temperature_2m_min",
-        "temperature_2m_mean",
-        "precipitation_sum",
-        "rain_sum",
-        "snowfall_sum",
-        "precipitation_hours",
-        "wind_speed_10m_max",
-        "wind_gusts_10m_max",
-        "wind_direction_10m_dominant",
-        "pressure_msl_mean",
-        "relative_humidity_2m_mean",
-        "cloud_cover_mean",
-        "shortwave_radiation_sum",
-        "et0_fao_evapotranspiration",
-    ]
+    if not chunks:
+        log.info("Empty date range %s → %s — nothing to download", start_date, end_date)
+        return None
 
-    all_dfs: List[pd.DataFrame] = []
+    client = _get_openmeteo_client()
     url = "https://archive-api.open-meteo.com/v1/archive"
+    all_dfs: List[pd.DataFrame] = []
 
     for i, (cs, ce) in enumerate(chunks):
         params = {
@@ -185,22 +243,57 @@ def download_openmeteo_historical(
             "longitude": lon,
             "start_date": cs,
             "end_date": ce,
-            "daily": daily_params,
+            "daily": DAILY_PARAMS,
             "timezone": config.data.openmeteo.timezone,
-            "timeformat": "iso8601",
         }
         try:
-            response = requests.get(url, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
-            if "daily" not in data:
-                log.warning("No daily data for %s..%s (lat=%s, lon=%s)", cs, ce, lat, lon)
+            responses = client.weather_api(url, params=params)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "limit" in err_str or "429" in err_str:
+                log.warning(
+                    "RATE LIMITED on %s..%s for lat=%s, lon=%s. "
+                    "Sleeping 300s before next attempt.",
+                    cs, ce, lat, lon,
+                )
+                time.sleep(300)
+                try:
+                    responses = client.weather_api(url, params=params)
+                except Exception as e2:
+                    log.warning("Chunk %s..%s still failed after rate-limit sleep: %s", cs, ce, lat, lon, e2)
+                    continue
+            else:
+                log.warning("Chunk %s..%s failed for lat=%s, lon=%s: %s", cs, ce, lat, lon, e)
                 continue
-            df = pd.DataFrame(data["daily"])
-            all_dfs.append(df)
-        except requests.RequestException as e:
-            log.warning("Chunk %s..%s failed for lat=%s, lon=%s: %s", cs, ce, lat, lon, e)
+
+        response = responses[0]
+
+        # Parse daily response
+        daily = response.Daily()
+        if daily is None:
+            log.warning("No daily data for %s..%s (lat=%s, lon=%s)", cs, ce, lat, lon)
             continue
+
+        # Build time index
+        time_index = pd.date_range(
+            start=pd.to_datetime(daily.Time(), unit="s", utc=True),
+            end=pd.to_datetime(daily.TimeEnd(), unit="s", utc=True),
+            freq=pd.Timedelta(seconds=daily.Interval()),
+            inclusive="left",
+        )
+
+        # Extract each variable by position
+        data: Dict[str, Any] = {"time": time_index}
+        for j, var_name in enumerate(DAILY_PARAMS):
+            try:
+                values = daily.Variables(j).ValuesAsNumpy()
+                # Open-Meteo fills missing days with NaN
+                data[var_name] = values
+            except Exception:
+                data[var_name] = np.full(len(time_index), np.nan)
+
+        chunk_df = pd.DataFrame(data)
+        all_dfs.append(chunk_df)
 
         if i < len(chunks) - 1:
             time.sleep(config.data.openmeteo.chunk_delay_seconds)

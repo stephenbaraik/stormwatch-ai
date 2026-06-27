@@ -31,6 +31,9 @@ api:
 pipeline:
 	python -m stormwatch.data.pipeline
 
+pipeline-force:
+	python -m stormwatch.data.pipeline --force
+
 monitor:
 	python -m stormwatch.monitor.drift
 

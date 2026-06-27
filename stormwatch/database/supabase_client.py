@@ -173,19 +173,45 @@ class SupabaseClient:
         return list({r["city"] for r in result.data})
 
     def get_city_date_range(self, city: str) -> tuple[Optional[str], Optional[str]]:
-        """Return (min_date, max_date) for a city's ingested data."""
+        """Return ``(min_date, max_date)`` for a city's ingested data."""
         client = self._get_client()
         result = (
             client.table("weather_data")
             .select("time")
             .eq("city", city)
             .order("time")
-            .limit(1)
             .execute()
         )
         if not result.data:
             return None, None
         return result.data[0]["time"], result.data[-1]["time"]
+
+    def get_city_max_date(self, city: str) -> Optional[str]:
+        """Return the most recent date with data for a city, or None if none."""
+        client = self._get_client()
+        result = (
+            client.table("weather_data")
+            .select("time")
+            .eq("city", city)
+            .order("time", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if not result.data:
+            return None
+        return result.data[0]["time"]
+
+    def get_city_record_count(self, city: str) -> int:
+        """Return the number of rows ingested for a city."""
+        client = self._get_client()
+        result = (
+            client.table("weather_data")
+            .select("id", count="exact")
+            .eq("city", city)
+            .limit(0)
+            .execute()
+        )
+        return result.count if hasattr(result, "count") else 0
 
 
 # ──────────────────────────────────────────────
