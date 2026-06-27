@@ -108,28 +108,48 @@ def apply_via_pooler(client: SupabaseClient) -> bool:
         return False
 
 
+def _tables_exist(client: SupabaseClient) -> bool:
+    """Check if the required DB tables already exist via the REST API."""
+    try:
+        raw = (
+            client._get_client()
+            .table("download_batches")
+            .select("id", count="exact")
+            .limit(0)
+            .execute()
+        )
+        if hasattr(raw, "count") and raw.count is not None:
+            log.info("Tables already exist — skipping migration.")
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def migrate() -> bool:
     """Run database migrations. Tries multiple methods in order.
 
     Returns True if schema was applied successfully, False otherwise.
     """
-    # Method 1: Direct Postgres connection via SUPABASE_DB_URL
+    config = SupabaseConfig.from_env()
+
+    if config.configured:
+        if _tables_exist(SupabaseClient(config)):
+            return True
+
     db_url = os.environ.get("SUPABASE_DB_URL")
     if db_url:
         return apply_via_db_url(db_url)
 
-    config = SupabaseConfig.from_env()
     if not config.configured:
         log.warning("Supabase not configured — skipping migration.")
         return False
 
     client = SupabaseClient(config)
 
-    # Method 2: exec_sql RPC
     if apply_via_exec_sql(client):
         return True
 
-    # Method 3: Connection pooler with JWT auth (service_role key)
     try:
         if apply_via_pooler(client):
             return True
@@ -141,7 +161,7 @@ def migrate() -> bool:
         "\n===== Manual Schema Setup Required =====\n"
         "Could not auto-apply the database schema.\n\n"
         "Option 1: Set SUPABASE_DB_URL and re-run:\n"
-        "  export SUPABASE_DB_URL=\"postgresql://postgres:PASS@db.PROJECT_REF.supabase.co:5432/postgres\"\n"
+        '  export SUPABASE_DB_URL="postgresql://postgres:PASS@db.PROJECT_REF.supabase.co:5432/postgres"\n'
         "  python -m stormwatch.database.migrate\n\n"
         "Option 2: Run the SQL manually:\n"
         "  1. Go to your Supabase dashboard → SQL Editor\n"
