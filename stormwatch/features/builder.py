@@ -5,12 +5,12 @@ Provides feature engineering pipelines for each model.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 
 from stormwatch.logger import get_logger
 
@@ -22,9 +22,14 @@ log = get_logger(__name__)
 # ──────────────────────────────────────────────
 
 CYCLONE_FEATURES = [
-    "lat_abs", "lon", "lat",
-    "pressure_min", "dist_to_land",
-    "year", "month", "dayofyear",
+    "lat_abs",
+    "lon",
+    "lat",
+    "pressure_min",
+    "dist_to_land",
+    "year",
+    "month",
+    "dayofyear",
     "wind_kts",
 ]
 
@@ -61,7 +66,11 @@ def build_cyclone_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
         if X[col].dtype in (np.float64, np.float32):
             X[col] = X[col].fillna(X[col].median())
 
-    y = df["category"].astype(int) if "category" in df.columns else pd.Series(dtype="int64")
+    y = (
+        df["category"].astype(int)
+        if "category" in df.columns
+        else pd.Series(dtype="int64")
+    )
 
     # Ensure all categories 0-5 are present
     if not y.empty:
@@ -76,14 +85,19 @@ def build_cyclone_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 # ──────────────────────────────────────────────
 
 HEATWAVE_FEATURES = [
-    "temp_max", "temp_max_lag_1", "temp_max_lag_3",
-    "temp_max_roll_mean_3", "temp_max_roll_mean_7",
+    "temp_max",
+    "temp_max_lag_1",
+    "temp_max_lag_3",
+    "temp_max_roll_mean_3",
+    "temp_max_roll_mean_7",
     "temp_min",
-    "precipitation", "precipitation_lag_1",
+    "precipitation",
+    "precipitation_lag_1",
     "relative_humidity_2m_mean",
     "wind_speed_10m_max",
     "pressure_msl_mean",
-    "month_sin", "month_cos",
+    "month_sin",
+    "month_cos",
     "month",
 ]
 
@@ -137,14 +151,19 @@ def build_heatwave_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 # ──────────────────────────────────────────────
 
 RAINFALL_FEATURES = [
-    "precipitation", "precipitation_lag_1", "precipitation_lag_3",
-    "precipitation_roll_mean_3", "precipitation_roll_mean_7",
-    "temp_max", "temp_max_roll_mean_3",
+    "precipitation",
+    "precipitation_lag_1",
+    "precipitation_lag_3",
+    "precipitation_roll_mean_3",
+    "precipitation_roll_mean_7",
+    "temp_max",
+    "temp_max_roll_mean_3",
     "relative_humidity_2m_mean",
     "wind_speed_10m_max",
     "pressure_msl_mean",
     "cloud_cover_mean",
-    "month_sin", "month_cos",
+    "month_sin",
+    "month_cos",
     "month",
 ]
 

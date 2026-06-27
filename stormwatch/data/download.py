@@ -9,7 +9,6 @@ Uses the official openmeteo-requests client with:
 
 from __future__ import annotations
 
-import csv
 import io
 import os
 import time
@@ -47,12 +46,12 @@ def _get_openmeteo_client():
 
     cache_session = requests_cache.CachedSession(
         ".openmeteo_cache",
-        expire_after=3600,           # cache valid for 1 hour
+        expire_after=3600,  # cache valid for 1 hour
     )
     retry_session = retry(
         cache_session,
         retries=5,
-        backoff_factor=0.5,          # 0.5s, 1s, 2s, 4s, 8s
+        backoff_factor=0.5,  # 0.5s, 1s, 2s, 4s, 8s
     )
     _OPENMETEO_CLIENT = openmeteo_requests.Client(session=retry_session)
     return _OPENMETEO_CLIENT
@@ -64,21 +63,111 @@ def _get_openmeteo_client():
 # Selected to cover diverse climate zones across India
 
 INDIAN_CITIES: List[Dict[str, Any]] = [
-    {"name": "Mumbai", "lat": 19.0760, "lon": 72.8777, "state": "Maharashtra", "zone": "coastal"},
-    {"name": "Chennai", "lat": 13.0827, "lon": 80.2707, "state": "Tamil Nadu", "zone": "coastal"},
-    {"name": "Kolkata", "lat": 22.5726, "lon": 88.3639, "state": "West Bengal", "zone": "coastal"},
-    {"name": "Delhi", "lat": 28.7041, "lon": 77.1025, "state": "Delhi", "zone": "inland"},
-    {"name": "Ahmedabad", "lat": 23.0225, "lon": 72.5714, "state": "Gujarat", "zone": "arid"},
-    {"name": "Hyderabad", "lat": 17.3850, "lon": 78.4867, "state": "Telangana", "zone": "inland"},
-    {"name": "Bengaluru", "lat": 12.9716, "lon": 77.5946, "state": "Karnataka", "zone": "inland"},
-    {"name": "Kochi", "lat": 9.9312, "lon": 76.2673, "state": "Kerala", "zone": "coastal"},
-    {"name": "Bhubaneswar", "lat": 20.2961, "lon": 85.8245, "state": "Odisha", "zone": "coastal"},
-    {"name": "Jaipur", "lat": 26.9124, "lon": 75.7873, "state": "Rajasthan", "zone": "arid"},
-    {"name": "Lucknow", "lat": 26.8467, "lon": 80.9462, "state": "Uttar Pradesh", "zone": "inland"},
-    {"name": "Guwahati", "lat": 26.1445, "lon": 91.7362, "state": "Assam", "zone": "humid"},
-    {"name": "Pune", "lat": 18.5204, "lon": 73.8567, "state": "Maharashtra", "zone": "inland"},
-    {"name": "Visakhapatnam", "lat": 17.6868, "lon": 83.2185, "state": "Andhra Pradesh", "zone": "coastal"},
-    {"name": "Surat", "lat": 21.1702, "lon": 72.8311, "state": "Gujarat", "zone": "coastal"},
+    {
+        "name": "Mumbai",
+        "lat": 19.0760,
+        "lon": 72.8777,
+        "state": "Maharashtra",
+        "zone": "coastal",
+    },
+    {
+        "name": "Chennai",
+        "lat": 13.0827,
+        "lon": 80.2707,
+        "state": "Tamil Nadu",
+        "zone": "coastal",
+    },
+    {
+        "name": "Kolkata",
+        "lat": 22.5726,
+        "lon": 88.3639,
+        "state": "West Bengal",
+        "zone": "coastal",
+    },
+    {
+        "name": "Delhi",
+        "lat": 28.7041,
+        "lon": 77.1025,
+        "state": "Delhi",
+        "zone": "inland",
+    },
+    {
+        "name": "Ahmedabad",
+        "lat": 23.0225,
+        "lon": 72.5714,
+        "state": "Gujarat",
+        "zone": "arid",
+    },
+    {
+        "name": "Hyderabad",
+        "lat": 17.3850,
+        "lon": 78.4867,
+        "state": "Telangana",
+        "zone": "inland",
+    },
+    {
+        "name": "Bengaluru",
+        "lat": 12.9716,
+        "lon": 77.5946,
+        "state": "Karnataka",
+        "zone": "inland",
+    },
+    {
+        "name": "Kochi",
+        "lat": 9.9312,
+        "lon": 76.2673,
+        "state": "Kerala",
+        "zone": "coastal",
+    },
+    {
+        "name": "Bhubaneswar",
+        "lat": 20.2961,
+        "lon": 85.8245,
+        "state": "Odisha",
+        "zone": "coastal",
+    },
+    {
+        "name": "Jaipur",
+        "lat": 26.9124,
+        "lon": 75.7873,
+        "state": "Rajasthan",
+        "zone": "arid",
+    },
+    {
+        "name": "Lucknow",
+        "lat": 26.8467,
+        "lon": 80.9462,
+        "state": "Uttar Pradesh",
+        "zone": "inland",
+    },
+    {
+        "name": "Guwahati",
+        "lat": 26.1445,
+        "lon": 91.7362,
+        "state": "Assam",
+        "zone": "humid",
+    },
+    {
+        "name": "Pune",
+        "lat": 18.5204,
+        "lon": 73.8567,
+        "state": "Maharashtra",
+        "zone": "inland",
+    },
+    {
+        "name": "Visakhapatnam",
+        "lat": 17.6868,
+        "lon": 83.2185,
+        "state": "Andhra Pradesh",
+        "zone": "coastal",
+    },
+    {
+        "name": "Surat",
+        "lat": 21.1702,
+        "lon": 72.8311,
+        "state": "Gujarat",
+        "zone": "coastal",
+    },
 ]
 
 
@@ -119,7 +208,10 @@ def download_ibtracs(
     save_path = Path(save_dir) / filename
 
     if save_path.exists() and not force:
-        log.info("IBTrACS data already exists at %s (use force=True to re-download)", save_path)
+        log.info(
+            "IBTrACS data already exists at %s (use force=True to re-download)",
+            save_path,
+        )
         return save_path
 
     log.info("Downloading IBTrACS %s basin data from NOAA...", basin)
@@ -254,16 +346,28 @@ def download_openmeteo_historical(
                 log.warning(
                     "RATE LIMITED on %s..%s for lat=%s, lon=%s. "
                     "Sleeping 300s before next attempt.",
-                    cs, ce, lat, lon,
+                    cs,
+                    ce,
+                    lat,
+                    lon,
                 )
                 time.sleep(300)
                 try:
                     responses = client.weather_api(url, params=params)
                 except Exception as e2:
-                    log.warning("Chunk %s..%s still failed after rate-limit sleep: %s", cs, ce, lat, lon, e2)
+                    log.warning(
+                        "Chunk %s..%s still failed after rate-limit sleep: %s",
+                        cs,
+                        ce,
+                        lat,
+                        lon,
+                        e2,
+                    )
                     continue
             else:
-                log.warning("Chunk %s..%s failed for lat=%s, lon=%s: %s", cs, ce, lat, lon, e)
+                log.warning(
+                    "Chunk %s..%s failed for lat=%s, lon=%s: %s", cs, ce, lat, lon, e
+                )
                 continue
 
         response = responses[0]
@@ -350,9 +454,13 @@ def download_all_weather_data(
             )
             if df is not None:
                 break
-            log.warning("Retry %d/%d for %s after %ds sleep",
-                        attempt + 1, retries, city["name"],
-                        config.data.openmeteo.retry_delay_seconds * (2**attempt))
+            log.warning(
+                "Retry %d/%d for %s after %ds sleep",
+                attempt + 1,
+                retries,
+                city["name"],
+                config.data.openmeteo.retry_delay_seconds * (2**attempt),
+            )
             time.sleep(config.data.openmeteo.retry_delay_seconds * (2**attempt))
 
         if df is None:
@@ -374,7 +482,11 @@ def download_all_weather_data(
     combined = pd.concat(all_dfs, ignore_index=True)
     combined_path = Path(save_dir) / "weather_all_cities.csv"
     combined.to_csv(combined_path, index=False)
-    log.info("Combined weather data: %s rows, %s columns", len(combined), len(combined.columns))
+    log.info(
+        "Combined weather data: %s rows, %s columns",
+        len(combined),
+        len(combined.columns),
+    )
     return combined
 
 
@@ -384,7 +496,9 @@ download_all = download_all_weather_data
 if __name__ == "__main__":
     # Smoke test: download small weather sample for one city
     log.info("Running download smoke test...")
-    df = download_openmeteo_historical(19.0760, 72.8777, start_date="2024-01-01", end_date="2024-01-10")
+    df = download_openmeteo_historical(
+        19.0760, 72.8777, start_date="2024-01-01", end_date="2024-01-10"
+    )
     if df is not None:
         print(df.head())
         print(f"✅ Weather download: {len(df)} days of data")

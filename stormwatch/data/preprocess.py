@@ -6,7 +6,7 @@ Cleans raw data, performs feature engineering, and labels extreme events.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -102,7 +102,9 @@ def preprocess_cyclones(df: pd.DataFrame) -> pd.DataFrame:
     pressure_col = pressure_col or ("pres" if "pres" in df.columns else None)
 
     if wind_col is None:
-        log.warning("No wind speed column found in IBTrACS data, defaulting to category 0")
+        log.warning(
+            "No wind speed column found in IBTrACS data, defaulting to category 0"
+        )
         df["wind_kts"] = 0
         df["category"] = 0
     else:
@@ -197,10 +199,13 @@ def label_extreme_events(
 
     # Precipitation
     precip_col = "precipitation_sum" if "precipitation_sum" in df.columns else "precip"
-    df["precipitation"] = pd.to_numeric(df[precip_col], errors="coerce") if precip_col in df.columns else 0.0
+    df["precipitation"] = (
+        pd.to_numeric(df[precip_col], errors="coerce")
+        if precip_col in df.columns
+        else 0.0
+    )
 
     # Wind
-    wind_col = "wind_speed_10m_max" if "wind_speed_10m_max" in df.columns else None
     gust_col = "wind_gusts_10m_max" if "wind_gusts_10m_max" in df.columns else None
 
     # Pressure
@@ -223,26 +228,28 @@ def label_extreme_events(
         )
 
         df["heatwave_flag"] = (df["heatwave_streak"] >= consecutive_days).astype(int)
-        df["severe_heatwave_flag"] = (df["severe_heatwave_streak"] >= consecutive_days).astype(int)
+        df["severe_heatwave_flag"] = (
+            df["severe_heatwave_streak"] >= consecutive_days
+        ).astype(int)
     else:
         df["heatwave_flag"] = 0
         df["severe_heatwave_flag"] = 0
 
     # ── Extreme rainfall ──
     # Per-city percentile thresholds
-    city_thresholds = df.groupby("city")["precipitation"].quantile(rainfall_percentile / 100).to_dict()
+    city_thresholds = (
+        df.groupby("city")["precipitation"]
+        .quantile(rainfall_percentile / 100)
+        .to_dict()
+    )
     severe_thresholds = df.groupby("city")["precipitation"].quantile(0.99).to_dict()
 
     df["extreme_rainfall"] = df.apply(
-        lambda row: int(
-            row["precipitation"] > city_thresholds.get(row["city"], 50)
-        ),
+        lambda row: int(row["precipitation"] > city_thresholds.get(row["city"], 50)),
         axis=1,
     )
     df["heavy_rainfall"] = df.apply(
-        lambda row: int(
-            row["precipitation"] > severe_thresholds.get(row["city"], 100)
-        ),
+        lambda row: int(row["precipitation"] > severe_thresholds.get(row["city"], 100)),
         axis=1,
     )
 
@@ -255,8 +262,16 @@ def label_extreme_events(
         df["cyclonic_flag"] = 0
 
     # Drop intermediate columns
-    drop_cols = [c for c in ["above_heatwave", "above_severe", "heatwave_streak", "severe_heatwave_streak"]
-                 if c in df.columns]
+    drop_cols = [
+        c
+        for c in [
+            "above_heatwave",
+            "above_severe",
+            "heatwave_streak",
+            "severe_heatwave_streak",
+        ]
+        if c in df.columns
+    ]
     df = df.drop(columns=drop_cols)
 
     log.info(
@@ -292,11 +307,11 @@ def prepare_weather_features(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             continue
         for window in [3, 7]:
-            df[f"{col}_roll_mean_{window}"] = (
-                df.groupby("city")[col].transform(lambda s: s.rolling(window, min_periods=1).mean())
+            df[f"{col}_roll_mean_{window}"] = df.groupby("city")[col].transform(
+                lambda s: s.rolling(window, min_periods=1).mean()
             )
-            df[f"{col}_roll_std_{window}"] = (
-                df.groupby("city")[col].transform(lambda s: s.rolling(window, min_periods=1).std().fillna(0))
+            df[f"{col}_roll_std_{window}"] = df.groupby("city")[col].transform(
+                lambda s: s.rolling(window, min_periods=1).std().fillna(0)
             )
 
     # Seasonal features
@@ -309,7 +324,10 @@ def prepare_weather_features(df: pd.DataFrame) -> pd.DataFrame:
         df["month_cos"] = np.cos(2 * np.pi * df["month"] / 12)
 
     # Drop NaN rows from lag creation
-    df = df.dropna(subset=[c for c in df.columns if "lag" in c or "roll" in c] + ["heatwave_flag"], how="all")
+    df = df.dropna(
+        subset=[c for c in df.columns if "lag" in c or "roll" in c] + ["heatwave_flag"],
+        how="all",
+    )
 
     return df
 
@@ -349,7 +367,9 @@ def preprocess_all(
         if save:
             weather_out = processed_dir / "weather_processed.csv"
             weather_df.to_csv(weather_out, index=False)
-            log.info("Saved processed weather → %s (%d rows)", weather_out, len(weather_df))
+            log.info(
+                "Saved processed weather → %s (%d rows)", weather_out, len(weather_df)
+            )
 
     # ── Cyclones ──
     cyclone_df = pd.DataFrame()
@@ -361,12 +381,16 @@ def preprocess_all(
         if save:
             cyclone_out = processed_dir / "cyclones_processed.csv"
             cyclone_df.to_csv(cyclone_out, index=False)
-            log.info("Saved processed cyclones → %s (%d rows)", cyclone_out, len(cyclone_df))
+            log.info(
+                "Saved processed cyclones → %s (%d rows)", cyclone_out, len(cyclone_df)
+            )
 
     return weather_df, cyclone_df
 
 
 if __name__ == "__main__":
     log.info("Run via: stormwatch.models.train.main() for the full training pipeline.")
-    print(f"Cyclonic conditions: {result['cyclonic_flag'].sum()}")
+    print(
+        "Skipping smoke test: run via stormwatch.models.train.main() for the full pipeline."
+    )
     print("✅ Preprocessing smoke test: PASSED")

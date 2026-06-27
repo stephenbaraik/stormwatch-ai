@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
@@ -31,20 +30,22 @@ class ExtremeRainfallModel(BaseWeatherModel):
         self.feature_names = [f for f in RAINFALL_FEATURES]
 
     def build_pipeline(self) -> Pipeline:
-        return Pipeline([
-            ("scaler", StandardScaler()),
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=self.config.get("n_estimators", 200),
-                    max_depth=self.config.get("max_depth", 12),
-                    min_samples_split=self.config.get("min_samples_split", 5),
-                    class_weight="balanced_subsample",
-                    random_state=self.config.get("random_state", 42),
-                    n_jobs=-1,
+        return Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "classifier",
+                    RandomForestClassifier(
+                        n_estimators=self.config.get("n_estimators", 200),
+                        max_depth=self.config.get("max_depth", 12),
+                        min_samples_split=self.config.get("min_samples_split", 5),
+                        class_weight="balanced_subsample",
+                        random_state=self.config.get("random_state", 42),
+                        n_jobs=-1,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
     def build_features(self, df: pd.DataFrame):
         """Build rainfall features from preprocessed DataFrame."""
@@ -61,21 +62,24 @@ class RainfallXGBModel(BaseWeatherModel):
     def build_pipeline(self) -> Pipeline:
         try:
             from xgboost import XGBClassifier
-            return Pipeline([
-                ("scaler", StandardScaler()),
-                (
-                    "classifier",
-                    XGBClassifier(
-                        n_estimators=self.config.get("n_estimators", 200),
-                        max_depth=self.config.get("max_depth", 8),
-                        learning_rate=self.config.get("learning_rate", 0.1),
-                        scale_pos_weight=self.config.get("scale_pos_weight", 10),
-                        eval_metric="logloss",
-                        random_state=self.config.get("random_state", 42),
-                        n_jobs=-1,
+
+            return Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "classifier",
+                        XGBClassifier(
+                            n_estimators=self.config.get("n_estimators", 200),
+                            max_depth=self.config.get("max_depth", 8),
+                            learning_rate=self.config.get("learning_rate", 0.1),
+                            scale_pos_weight=self.config.get("scale_pos_weight", 10),
+                            eval_metric="logloss",
+                            random_state=self.config.get("random_state", 42),
+                            n_jobs=-1,
+                        ),
                     ),
-                ),
-            ])
+                ]
+            )
         except ImportError:
             return ExtremeRainfallModel(self.config).build_pipeline()
 

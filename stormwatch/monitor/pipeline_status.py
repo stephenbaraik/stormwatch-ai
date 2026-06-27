@@ -68,20 +68,16 @@ def show_pipeline_status():
             except Exception:
                 pass
         print(
-            f"    {icon}  Batch #{b['id']}: {status}  "
-            f"| {b['rows_ingested']} rows{dur}"
+            f"    {icon}  Batch #{b['id']}: {status}  | {b['rows_ingested']} rows{dur}"
         )
         if b.get("error_message"):
             print(f"       Error: {b['error_message'][:200]}")
 
     # ── Per-city coverage ──
-    print(f"\n  City coverage:")
+    print("\n  City coverage:")
     try:
         cities_data = (
-            client._get_client()
-            .table("weather_data")
-            .select("city")
-            .execute()
+            client._get_client().table("weather_data").select("city").execute()
         )
         city_names = sorted(set(r["city"] for r in cities_data.data))
     except Exception:
@@ -90,8 +86,10 @@ def show_pipeline_status():
     if not city_names:
         print("    (no data ingested yet)")
     else:
-        print(f"    {'City':<20} {'Rows':>7} {'Earliest':<14} {'Latest':<14} {'Status'}")
-        print(f"    {'─'*20} {'─'*7} {'─'*14} {'─'*14} {'─'*10}")
+        print(
+            f"    {'City':<20} {'Rows':>7} {'Earliest':<14} {'Latest':<14} {'Status'}"
+        )
+        print(f"    {'─' * 20} {'─' * 7} {'─' * 14} {'─' * 14} {'─' * 10}")
         now = datetime.now(timezone.utc)
         for city in city_names:
             min_d, max_d = client.get_city_date_range(city)
@@ -107,16 +105,22 @@ def show_pipeline_status():
                         status = "🟡 aging"
                 except Exception:
                     pass
-            print(f"    {city:<20} {cnt:>7} {str(min_d)[:10] if min_d else '-':<14} {str(max_d)[:10] if max_d else '-':<14} {status}")
+            print(
+                f"    {city:<20} {cnt:>7} {str(min_d)[:10] if min_d else '-':<14} {str(max_d)[:10] if max_d else '-':<14} {status}"
+            )
 
-    total_rows = sum(client.get_city_record_count(c) for c in city_names) if city_names else 0
+    total_rows = (
+        sum(client.get_city_record_count(c) for c in city_names) if city_names else 0
+    )
     today_rows = 0
     try:
         result = (
             client._get_client()
             .table("weather_data")
             .select("id", count="exact")
-            .gte("ingested_at", datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z"))
+            .gte(
+                "ingested_at", datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00Z")
+            )
             .limit(0)
             .execute()
         )

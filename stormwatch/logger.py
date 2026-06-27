@@ -6,7 +6,6 @@ Structured logging with rich console output and file rotation.
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 from typing import Optional
 
@@ -30,6 +29,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     """
     if name is None:
         import inspect
+
         frame = inspect.currentframe()
         name = frame.f_back.f_globals["__name__"] if frame else "stormwatch"
 
@@ -62,9 +62,7 @@ def get_logger(name: Optional[str] = None) -> logging.Logger:
     log_dir.mkdir(exist_ok=True)
     file_handler = logging.FileHandler(log_dir / "stormwatch.log", mode="a")
     file_handler.setLevel(level)
-    file_handler.setFormatter(
-        logging.Formatter(config.logging.format)
-    )
+    file_handler.setFormatter(logging.Formatter(config.logging.format))
     logger.addHandler(file_handler)
 
     logger.propagate = False

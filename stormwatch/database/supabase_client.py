@@ -66,6 +66,7 @@ class SupabaseClient:
                 "Supabase not configured. Set SUPABASE_URL and SUPABASE_SERVICE_KEY."
             )
         from supabase import create_client
+
         self._client = create_client(self._config.url, self._config.service_key)
         return self._client
 
@@ -103,20 +104,24 @@ class SupabaseClient:
     def complete_batch(self, batch_id: int, rows_ingested: int) -> None:
         """Mark a batch as completed."""
         client = self._get_client()
-        client.table("download_batches").update({
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "rows_ingested": rows_ingested,
-            "status": "completed",
-        }).eq("id", batch_id).execute()
+        client.table("download_batches").update(
+            {
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "rows_ingested": rows_ingested,
+                "status": "completed",
+            }
+        ).eq("id", batch_id).execute()
 
     def fail_batch(self, batch_id: int, error: str) -> None:
         """Mark a batch as failed."""
         client = self._get_client()
-        client.table("download_batches").update({
-            "completed_at": datetime.now(timezone.utc).isoformat(),
-            "status": "failed",
-            "error_message": error[:500],
-        }).eq("id", batch_id).execute()
+        client.table("download_batches").update(
+            {
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "status": "failed",
+                "error_message": error[:500],
+            }
+        ).eq("id", batch_id).execute()
 
     def get_latest_batch(self) -> Optional[dict]:
         """Return the most recent batch record, or None."""
@@ -163,11 +168,7 @@ class SupabaseClient:
     def get_ingested_cities(self) -> list[str]:
         """Return list of city names that already have data in Supabase."""
         client = self._get_client()
-        result = (
-            client.table("weather_data")
-            .select("city")
-            .execute()
-        )
+        result = client.table("weather_data").select("city").execute()
         if not result.data:
             return []
         return list({r["city"] for r in result.data})

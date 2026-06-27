@@ -5,9 +5,8 @@ Monitors feature distributions for drift using statistical tests.
 
 from __future__ import annotations
 
-import os
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -110,9 +109,7 @@ def record_prediction(
 # ──────────────────────────────────────────────
 
 
-def compute_drift(
-    reference: pd.DataFrame, current: pd.DataFrame
-) -> List[DriftResult]:
+def compute_drift(reference: pd.DataFrame, current: pd.DataFrame) -> List[DriftResult]:
     """Run Kolmogorov-Smirnov test on each numeric feature.
 
     Args:
@@ -152,9 +149,7 @@ def compute_drift(
     return results
 
 
-def run_drift_check(
-    model_name: str, model: Optional[object] = None
-) -> Dict[str, Any]:
+def run_drift_check(model_name: str, model: Optional[object] = None) -> Dict[str, Any]:
     """Run a full drift check for a model.
 
     Loads recent predictions from the monitor database and compares

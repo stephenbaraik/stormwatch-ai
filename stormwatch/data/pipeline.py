@@ -52,7 +52,9 @@ def _get_supabase_client():
 
         client = SupabaseClient()
         if not client._config.configured:
-            log.warning("Supabase not configured — skipping upload (set SUPABASE_URL + SUPABASE_SERVICE_KEY)")
+            log.warning(
+                "Supabase not configured — skipping upload (set SUPABASE_URL + SUPABASE_SERVICE_KEY)"
+            )
             return None
         return client
     except Exception as exc:
@@ -80,7 +82,9 @@ def _resolve_date_range(
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
     if force:
-        log.info("  └─ Force mode — downloading full range %s → %s", start_date, yesterday)
+        log.info(
+            "  └─ Force mode — downloading full range %s → %s", start_date, yesterday
+        )
         return start_date, yesterday
 
     if supabase is None:
@@ -94,17 +98,26 @@ def _resolve_date_range(
         return start_date, yesterday
 
     # Compute next day after max_date
-    max_dt = datetime.fromisoformat(max_date) if "T" in max_date else datetime.strptime(max_date, "%Y-%m-%d")
+    max_dt = (
+        datetime.fromisoformat(max_date)
+        if "T" in max_date
+        else datetime.strptime(max_date, "%Y-%m-%d")
+    )
     next_day = (max_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
     if next_day >= yesterday:
-        log.info("  └─ Already up to date (max=%s) — nothing to download", max_date[:10])
+        log.info(
+            "  └─ Already up to date (max=%s) — nothing to download", max_date[:10]
+        )
         return "", ""
 
     count = supabase.get_city_record_count(city["name"])
     log.info(
         "  └─ Resume from %s → %s (%d existing rows, fetching %s onward)",
-        start_date, yesterday, count, next_day,
+        start_date,
+        yesterday,
+        count,
+        next_day,
     )
     return next_day, yesterday
 
@@ -174,7 +187,9 @@ def run_ingest_batch(
         log.info("[%d/%d] %s — checking...", i + 1, len(cities), city["name"])
 
         # Determine what date range needs fetching
-        effective_start, effective_end = _resolve_date_range(city, start_date, supabase, force)
+        effective_start, effective_end = _resolve_date_range(
+            city, start_date, supabase, force
+        )
         if not effective_start:
             log.info("  └─ Skipping (fully up to date)")
             skipped_cities += 1
@@ -191,7 +206,9 @@ def run_ingest_batch(
         if df is None or df.empty:
             # Check if it was a rate-limit issue by whether Supabase has *any* data
             if supabase and supabase.get_city_record_count(city["name"]) == 0:
-                log.warning("  └─ No data and nothing in Supabase — rate-limited? Will retry next run")
+                log.warning(
+                    "  └─ No data and nothing in Supabase — rate-limited? Will retry next run"
+                )
                 rate_limited_cities += 1
             else:
                 log.warning("  └─ No new data to download")
@@ -199,7 +216,9 @@ def run_ingest_batch(
 
         # Add metadata + preprocess
         df = _process_city_data(df, city)
-        log.info("  └─ Downloaded %d rows (%s → %s)", len(df), effective_start, effective_end)
+        log.info(
+            "  └─ Downloaded %d rows (%s → %s)", len(df), effective_start, effective_end
+        )
 
         # Save CSV backup (before rename to keep original column names)
         if save_csv:
@@ -251,7 +270,9 @@ def run_ingest_batch(
         return pd.DataFrame()
 
     combined = pd.concat(all_dfs, ignore_index=True)
-    log.info("Cities with new data: %d | Combined rows: %d", len(all_dfs), len(combined))
+    log.info(
+        "Cities with new data: %d | Combined rows: %d", len(all_dfs), len(combined)
+    )
     return combined
 
 
@@ -266,7 +287,7 @@ def main() -> None:
         "--start-date",
         default="2010-01-01",
         help="Fallback start date YYYY-MM-DD (default: 2010-01-01). "
-             "Only used when a city has no existing data in Supabase.",
+        "Only used when a city has no existing data in Supabase.",
     )
     parser.add_argument(
         "--no-upload",

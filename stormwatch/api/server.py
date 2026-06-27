@@ -5,13 +5,11 @@ Production-grade REST API for extreme weather predictions.
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Dict, Optional
 
 import joblib
-import numpy as np
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -321,6 +319,7 @@ def _category_to_wind(category: int) -> float:
 def main() -> None:
     """Run the API server with uvicorn."""
     import uvicorn
+
     uvicorn.run(
         "stormwatch.api.server:app",
         host=config.api.host,

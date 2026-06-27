@@ -6,14 +6,12 @@ Abstract base class for all extreme weather models.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
-    classification_report,
-    confusion_matrix,
     f1_score,
     log_loss,
     precision_score,
@@ -70,7 +68,9 @@ class BaseWeatherModel(ABC):
         y_proba = self._predict_proba_safe(self.pipeline, X)
 
         metrics = self._compute_metrics(y, y_pred, y_proba)
-        log = __import__("stormwatch.logger", fromlist=["get_logger"]).get_logger(__name__)
+        log = __import__("stormwatch.logger", fromlist=["get_logger"]).get_logger(
+            __name__
+        )
         log.info("Training complete: %s", metrics)
 
         return metrics
@@ -162,12 +162,18 @@ class BaseWeatherModel(ABC):
         except (AttributeError, NotImplementedError):
             return np.zeros((len(X), 2))
 
-    def _compute_metrics(self, y_true: pd.Series, y_pred: np.ndarray, y_proba: np.ndarray) -> Dict[str, float]:
+    def _compute_metrics(
+        self, y_true: pd.Series, y_pred: np.ndarray, y_proba: np.ndarray
+    ) -> Dict[str, float]:
         """Compute classification metrics."""
         metrics: Dict[str, float] = {
             "accuracy": float(accuracy_score(y_true, y_pred)),
-            "precision": float(precision_score(y_true, y_pred, zero_division=0, average="weighted")),
-            "recall": float(recall_score(y_true, y_pred, zero_division=0, average="weighted")),
+            "precision": float(
+                precision_score(y_true, y_pred, zero_division=0, average="weighted")
+            ),
+            "recall": float(
+                recall_score(y_true, y_pred, zero_division=0, average="weighted")
+            ),
             "f1": float(f1_score(y_true, y_pred, zero_division=0, average="weighted")),
         }
 
@@ -182,7 +188,9 @@ class BaseWeatherModel(ABC):
                 metrics["log_loss"] = float(log_loss(y_true, y_proba[:, 1]))
             elif n_classes > 2:
                 try:
-                    metrics["roc_auc"] = float(roc_auc_score(y_true, y_proba, multi_class="ovr"))
+                    metrics["roc_auc"] = float(
+                        roc_auc_score(y_true, y_proba, multi_class="ovr")
+                    )
                 except ValueError:
                     metrics["roc_auc"] = 0.5
                 metrics["log_loss"] = float(log_loss(y_true, y_proba))

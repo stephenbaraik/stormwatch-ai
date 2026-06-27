@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.pipeline import Pipeline
@@ -29,20 +28,22 @@ class CycloneIntensityModel(BaseWeatherModel):
         self.feature_names = CYCLONE_FEATURES[:]
 
     def build_pipeline(self) -> Pipeline:
-        return Pipeline([
-            ("scaler", StandardScaler()),
-            (
-                "classifier",
-                RandomForestClassifier(
-                    n_estimators=self.config.get("n_estimators", 200),
-                    max_depth=self.config.get("max_depth", 15),
-                    min_samples_split=self.config.get("min_samples_split", 5),
-                    class_weight="balanced",
-                    random_state=self.config.get("random_state", 42),
-                    n_jobs=-1,
+        return Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                (
+                    "classifier",
+                    RandomForestClassifier(
+                        n_estimators=self.config.get("n_estimators", 200),
+                        max_depth=self.config.get("max_depth", 15),
+                        min_samples_split=self.config.get("min_samples_split", 5),
+                        class_weight="balanced",
+                        random_state=self.config.get("random_state", 42),
+                        n_jobs=-1,
+                    ),
                 ),
-            ),
-        ])
+            ]
+        )
 
     def build_features(self, df: pd.DataFrame):
         """Build cyclone features from raw DataFrame."""
@@ -59,22 +60,25 @@ class CycloneIntensityXGB(BaseWeatherModel):
     def build_pipeline(self) -> Pipeline:
         try:
             from xgboost import XGBClassifier
-            return Pipeline([
-                ("scaler", StandardScaler()),
-                (
-                    "classifier",
-                    XGBClassifier(
-                        n_estimators=self.config.get("n_estimators", 200),
-                        max_depth=self.config.get("max_depth", 8),
-                        learning_rate=self.config.get("learning_rate", 0.1),
-                        objective="multi:softprob",
-                        num_class=6,  # categories 0-5
-                        eval_metric="mlogloss",
-                        random_state=self.config.get("random_state", 42),
-                        n_jobs=-1,
+
+            return Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    (
+                        "classifier",
+                        XGBClassifier(
+                            n_estimators=self.config.get("n_estimators", 200),
+                            max_depth=self.config.get("max_depth", 8),
+                            learning_rate=self.config.get("learning_rate", 0.1),
+                            objective="multi:softprob",
+                            num_class=6,  # categories 0-5
+                            eval_metric="mlogloss",
+                            random_state=self.config.get("random_state", 42),
+                            n_jobs=-1,
+                        ),
                     ),
-                ),
-            ])
+                ]
+            )
         except ImportError:
             # Fallback to RandomForest
             return CycloneIntensityModel(self.config).build_pipeline()

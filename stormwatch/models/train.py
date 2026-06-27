@@ -6,26 +6,21 @@ Training requires real weather and cyclone data — no synthetic fallbacks.
 
 from __future__ import annotations
 
-import json
-import os
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import joblib
 import numpy as np
 import pandas as pd
 from hyperopt import STATUS_OK, Trials, fmin, hp, tpe
-from sklearn.model_selection import StratifiedKFold, cross_val_score, train_test_split
+from sklearn.model_selection import cross_val_score, train_test_split
 
 import mlflow
 from stormwatch.config import get_config
 from stormwatch.data.download import download_all_weather_data, download_ibtracs
 from stormwatch.data.preprocess import (
-    label_extreme_events,
-    prepare_weather_features,
     preprocess_all,
-    preprocess_cyclones,
 )
 from stormwatch.features.builder import (
     build_cyclone_features,
@@ -75,14 +70,16 @@ def train_cyclone_model(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    with mlflow.start_run(run_name="cyclone_intensity") as run:
-        mlflow.log_params({
-            "model_type": "XGBoost",
-            "n_features": X.shape[1],
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "classes": sorted(y.unique().tolist()),
-        })
+    with mlflow.start_run(run_name="cyclone_intensity") as _:
+        mlflow.log_params(
+            {
+                "model_type": "XGBoost",
+                "n_features": X.shape[1],
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "classes": sorted(y.unique().tolist()),
+            }
+        )
 
         best_params = {}
 
@@ -93,10 +90,12 @@ def train_cyclone_model(
             log.info("Best params: %s", best_params)
 
         # Train with best params
-        model = CycloneIntensityXGB(config={
-            "random_state": 42,
-            **best_params,
-        })
+        model = CycloneIntensityXGB(
+            config={
+                "random_state": 42,
+                **best_params,
+            }
+        )
         train_metrics = model.train(X_train, y_train)
         test_metrics = model.evaluate(X_test, y_test)
 
@@ -119,8 +118,11 @@ def train_cyclone_model(
         # Log test predictions
         _log_prediction_samples(model, X_test, y_test, "cyclone")
 
-        log.info("Cyclone model trained: test_accuracy=%.3f, test_f1=%.3f",
-                 test_metrics.get("accuracy", 0), test_metrics.get("f1", 0))
+        log.info(
+            "Cyclone model trained: test_accuracy=%.3f, test_f1=%.3f",
+            test_metrics.get("accuracy", 0),
+            test_metrics.get("f1", 0),
+        )
 
     return model
 
@@ -144,14 +146,16 @@ def train_heatwave_model(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    with mlflow.start_run(run_name="heatwave_prediction") as run:
-        mlflow.log_params({
-            "model_type": "XGBoost",
-            "n_features": X.shape[1],
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "pos_ratio": float(y_train.mean()),
-        })
+    with mlflow.start_run(run_name="heatwave_prediction") as _:
+        mlflow.log_params(
+            {
+                "model_type": "XGBoost",
+                "n_features": X.shape[1],
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "pos_ratio": float(y_train.mean()),
+            }
+        )
 
         best_params = {}
         if use_hyperopt:
@@ -160,11 +164,15 @@ def train_heatwave_model(
             mlflow.log_params({f"hyperopt_{k}": v for k, v in best_params.items()})
             log.info("Best params: %s", best_params)
 
-        model = HeatwaveXGBModel(config={
-            "random_state": 42,
-            "scale_pos_weight": int((y_train == 0).sum() / max((y_train == 1).sum(), 1)),
-            **best_params,
-        })
+        model = HeatwaveXGBModel(
+            config={
+                "random_state": 42,
+                "scale_pos_weight": int(
+                    (y_train == 0).sum() / max((y_train == 1).sum(), 1)
+                ),
+                **best_params,
+            }
+        )
         train_metrics = model.train(X_train, y_train)
         test_metrics = model.evaluate(X_test, y_test)
 
@@ -183,8 +191,11 @@ def train_heatwave_model(
 
         _log_prediction_samples(model, X_test, y_test, "heatwave")
 
-        log.info("Heatwave model trained: test_accuracy=%.3f, test_auc=%.3f",
-                 test_metrics.get("accuracy", 0), test_metrics.get("roc_auc", 0))
+        log.info(
+            "Heatwave model trained: test_accuracy=%.3f, test_auc=%.3f",
+            test_metrics.get("accuracy", 0),
+            test_metrics.get("roc_auc", 0),
+        )
 
     return model
 
@@ -208,14 +219,16 @@ def train_rainfall_model(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
 
-    with mlflow.start_run(run_name="extreme_rainfall") as run:
-        mlflow.log_params({
-            "model_type": "XGBoost",
-            "n_features": X.shape[1],
-            "n_train": len(X_train),
-            "n_test": len(X_test),
-            "pos_ratio": float(y_train.mean()),
-        })
+    with mlflow.start_run(run_name="extreme_rainfall") as _:
+        mlflow.log_params(
+            {
+                "model_type": "XGBoost",
+                "n_features": X.shape[1],
+                "n_train": len(X_train),
+                "n_test": len(X_test),
+                "pos_ratio": float(y_train.mean()),
+            }
+        )
 
         best_params = {}
         if use_hyperopt:
@@ -223,11 +236,15 @@ def train_rainfall_model(
             best_params = _hyperopt_rainfall(X_train, y_train)
             mlflow.log_params({f"hyperopt_{k}": v for k, v in best_params.items()})
 
-        model = RainfallXGBModel(config={
-            "random_state": 42,
-            "scale_pos_weight": int((y_train == 0).sum() / max((y_train == 1).sum(), 1)),
-            **best_params,
-        })
+        model = RainfallXGBModel(
+            config={
+                "random_state": 42,
+                "scale_pos_weight": int(
+                    (y_train == 0).sum() / max((y_train == 1).sum(), 1)
+                ),
+                **best_params,
+            }
+        )
         train_metrics = model.train(X_train, y_train)
         test_metrics = model.evaluate(X_test, y_test)
 
@@ -246,8 +263,11 @@ def train_rainfall_model(
 
         _log_prediction_samples(model, X_test, y_test, "rainfall")
 
-        log.info("Rainfall model trained: test_accuracy=%.3f, test_auc=%.3f",
-                 test_metrics.get("accuracy", 0), test_metrics.get("roc_auc", 0))
+        log.info(
+            "Rainfall model trained: test_accuracy=%.3f, test_auc=%.3f",
+            test_metrics.get("accuracy", 0),
+            test_metrics.get("roc_auc", 0),
+        )
 
     return model
 
@@ -279,8 +299,10 @@ def _ensure_data_downloaded(
     # ── Weather data ──
     combined_path = Path(config.data.raw_path) / "weather_all_cities.csv"
     if download_weather and (not combined_path.exists() or force):
-        log.info("Downloading real weather data from Open-Meteo for %d cities...",
-                 len(download_all_weather_data.__code__.co_consts))
+        log.info(
+            "Downloading real weather data from Open-Meteo for %d cities...",
+            len(download_all_weather_data.__code__.co_consts),
+        )
         raw_weather = download_all_weather_data(force=force)
         if raw_weather.empty:
             log.warning("Open-Meteo download returned no data")
@@ -292,10 +314,13 @@ def _ensure_data_downloaded(
         log.info("Weather download skipped")
 
     # ── Cyclone data (IBTrACS) ──
-    cyclone_path = Path(config.data.raw_path) / f"ibtracs_{config.data.ibtracs.basin}.csv"
+    cyclone_path = (
+        Path(config.data.raw_path) / f"ibtracs_{config.data.ibtracs.basin}.csv"
+    )
     if download_cyclone and (not cyclone_path.exists() or force):
-        log.info("Downloading IBTrACS cyclone data (%s basin)...",
-                 config.data.ibtracs.basin)
+        log.info(
+            "Downloading IBTrACS cyclone data (%s basin)...", config.data.ibtracs.basin
+        )
         result = download_ibtracs(basin=config.data.ibtracs.basin, force=force)
         if result is None:
             log.warning("IBTrACS download failed")
@@ -346,7 +371,9 @@ def train_all(
 
     # Download real data if not provided
     if weather_df is None and cyclone_df is None:
-        log.info("No data provided. Downloading real weather data from Open-Meteo / IBTrACS...")
+        log.info(
+            "No data provided. Downloading real weather data from Open-Meteo / IBTrACS..."
+        )
         weather_df, cyclone_df = _ensure_data_downloaded()
 
     # ── Cyclone model ──
@@ -395,7 +422,7 @@ def _hyperopt_cyclone(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
                 model.build_pipeline(), X, y, cv=3, scoring="f1_weighted"
             )
             return {"loss": -scores.mean(), "status": STATUS_OK}
-        except Exception as e:
+        except Exception:
             return {"loss": 1.0, "status": STATUS_OK}
 
     space = {
@@ -433,7 +460,7 @@ def _hyperopt_heatwave(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
                 model.build_pipeline(), X, y, cv=3, scoring="roc_auc"
             )
             return {"loss": -scores.mean(), "status": STATUS_OK}
-        except Exception as e:
+        except Exception:
             return {"loss": 1.0, "status": STATUS_OK}
 
     pos_weight = int((y == 0).sum() / max((y == 1).sum(), 1))
@@ -441,7 +468,9 @@ def _hyperopt_heatwave(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
         "max_depth": hp.quniform("max_depth", 3, 10, 1),
         "n_estimators": hp.quniform("n_estimators", 100, 300, 50),
         "learning_rate": hp.uniform("learning_rate", 0.01, 0.3),
-        "scale_pos_weight": hp.quniform("scale_pos_weight", max(1, pos_weight // 2), pos_weight * 2, 1),
+        "scale_pos_weight": hp.quniform(
+            "scale_pos_weight", max(1, pos_weight // 2), pos_weight * 2, 1
+        ),
         "subsample": hp.uniform("subsample", 0.6, 1.0),
         "colsample_bytree": hp.uniform("colsample_bytree", 0.6, 1.0),
     }
@@ -479,7 +508,9 @@ def _hyperopt_rainfall(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
         "max_depth": hp.quniform("max_depth", 3, 10, 1),
         "n_estimators": hp.quniform("n_estimators", 100, 300, 50),
         "learning_rate": hp.uniform("learning_rate", 0.01, 0.3),
-        "scale_pos_weight": hp.quniform("scale_pos_weight", max(1, pos_weight // 2), pos_weight * 2, 1),
+        "scale_pos_weight": hp.quniform(
+            "scale_pos_weight", max(1, pos_weight // 2), pos_weight * 2, 1
+        ),
         "subsample": hp.uniform("subsample", 0.6, 1.0),
         "colsample_bytree": hp.uniform("colsample_bytree", 0.6, 1.0),
     }
@@ -499,9 +530,6 @@ def _hyperopt_rainfall(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
 # ──────────────────────────────────────────────
 #  Helpers
 # ──────────────────────────────────────────────
-
-
-
 
 
 def _log_feature_importance(model: Any, feature_names: pd.Index) -> None:
@@ -531,18 +559,19 @@ def _log_prediction_samples(
         y_pred = model.predict(X_test)
         y_proba = model.predict_proba(X_test)
 
-        samples = pd.DataFrame({
-            "true": y_test.values[:50],
-            "predicted": y_pred[:50],
-            "probability": (
-                y_proba[:50, 1] if y_proba.ndim > 1 and y_proba.shape[1] > 1
-                else y_proba[:50, 0]
-            ),
-        })
+        samples = pd.DataFrame(
+            {
+                "true": y_test.values[:50],
+                "predicted": y_pred[:50],
+                "probability": (
+                    y_proba[:50, 1]
+                    if y_proba.ndim > 1 and y_proba.shape[1] > 1
+                    else y_proba[:50, 0]
+                ),
+            }
+        )
 
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".json", delete=False
-        ) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             samples.to_json(f, orient="records", indent=2)
             mlflow.log_artifact(f.name, artifact_path="predictions")
     except Exception as e:
@@ -589,8 +618,7 @@ def main() -> None:
     for model_name, metrics in results.items():
         acc = metrics.get("accuracy", 0)
         auc = metrics.get("roc_auc", 0)
-        log.info("  %s: accuracy=%.3f, roc_auc=%.3f",
-                 model_name, acc, auc)
+        log.info("  %s: accuracy=%.3f, roc_auc=%.3f", model_name, acc, auc)
 
     log.info("=" * 60)
     log.info("View MLflow UI: mlflow ui --backend-store-uri ./mlflow")
