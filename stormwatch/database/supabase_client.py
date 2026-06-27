@@ -88,8 +88,8 @@ class SupabaseClient:
             )
             if result.data is not None:
                 return True
-        except Exception:
-            pass
+        except Exception as exc:
+            log.warning("Table check failed: %s", exc)
         log.warning(
             "Tables not found. Run stormwatch/database/schema.sql "
             "in your Supabase SQL Editor before running the pipeline."
