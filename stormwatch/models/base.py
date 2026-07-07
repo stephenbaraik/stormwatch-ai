@@ -8,6 +8,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
+import joblib
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
@@ -127,6 +128,52 @@ class BaseWeatherModel(ABC):
     def is_trained(self) -> bool:
         """Check if model has been trained."""
         return self._is_trained
+
+    def save(self, path: str) -> None:
+        """Save trained model to disk via joblib."""
+        if not self._is_trained:
+            raise RuntimeError("Cannot save untrained model")
+        joblib.dump(self, path)
+
+    @staticmethod
+    def load(path: str) -> BaseWeatherModel:
+        """Load a trained model from disk."""
+        return joblib.load(path)
+
+    def log_model(self, artifact_path: str = "model") -> str:
+        """Log model to MLflow with signature, input example, and registry.
+
+        Logs the trained sklearn Pipeline directly for native MLflow support.
+        Returns the MLflow model URI.
+        """
+        import mlflow
+        from mlflow.models.signature import infer_signature
+
+        if not self._is_trained or self.pipeline is None:
+            raise RuntimeError("Cannot log untrained model")
+
+        sample = pd.DataFrame(
+            {f: [0.0] for f in self.feature_names} if self.feature_names
+            else {"_dummy": [0]}
+        )
+        for col in sample.columns:
+            sample[col] = sample[col].astype(float)
+        sample_input = sample.iloc[[0]]
+        signature = infer_signature(
+            sample_input,
+            self.predict(sample_input),
+        )
+
+        # MLflow 3.x requires explicit trust for XGBoost sklearn wrappers
+        trusted = ["xgboost.core.Booster", "xgboost.sklearn.XGBClassifier"]
+        return mlflow.sklearn.log_model(
+            sk_model=self.pipeline,
+            artifact_path=artifact_path,
+            signature=signature,
+            input_example=sample_input,
+            registered_model_name=None,
+            skops_trusted_types=trusted,
+        ).model_uri
 
     # ── Internal helpers ──
 

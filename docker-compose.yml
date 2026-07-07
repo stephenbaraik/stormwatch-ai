@@ -6,7 +6,7 @@ services:
     depends_on:
       - mlflow
     environment:
-      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - STORMWATCH__TRAINING__MLFLOW_TRACKING_URI=http://mlflow:5000
     restart: unless-stopped
 
   mlflow:

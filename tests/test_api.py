@@ -68,7 +68,6 @@ class TestCycloneEndpoint:
         features = {
             "lat_abs": 15.5, "lon": 80.0, "lat": 15.5, "pressure_min": 980.0,
             "dist_to_land": 50.0, "year": 2024, "month": 10, "dayofyear": 285,
-            "wind_kts": 80.0,
         }
         resp = client.post("/predict/cyclone", json=features)
         assert resp.status_code == 200
@@ -82,7 +81,7 @@ class TestCycloneEndpoint:
         server._models.clear()
         features = CycloneFeatures(
             lat_abs=10, lon=80, lat=10, pressure_min=1000,
-            dist_to_land=0, year=2024, month=1, dayofyear=1, wind_kts=50,
+            dist_to_land=0, year=2024, month=1, dayofyear=1,
         )
         resp = client.post("/predict/cyclone", json=features.model_dump())
         assert resp.status_code == 503
@@ -99,9 +98,9 @@ class TestHeatwaveEndpoint:
         server._models["heatwave"] = mock
 
         features = {
-            "temp_max": 42.0, "temp_max_lag_1": 40.0, "temp_max_lag_3": 38.0,
+            "temp_max_lag_1": 42.0, "temp_max_lag_3": 40.0, "temp_max_lag_7": 38.0,
             "temp_max_roll_mean_3": 41.0, "temp_max_roll_mean_7": 39.0,
-            "temp_min": 28.0, "precipitation": 0.0, "precipitation_lag_1": 0.0,
+            "temp_min_lag_1": 28.0, "precipitation_lag_1": 0.0,
             "relative_humidity_2m_mean": 25.0, "wind_speed_10m_max": 15.0,
             "pressure_msl_mean": 1008.0, "month_sin": 0.5, "month_cos": 0.866,
             "month": 6,
@@ -118,9 +117,9 @@ class TestHeatwaveEndpoint:
     def test_heatwave_503_when_not_loaded(self, client: TestClient):
         server._models.clear()
         features = HeatwaveFeatures(
-            temp_max=30, temp_max_lag_1=29, temp_max_lag_3=28,
+            temp_max_lag_1=30, temp_max_lag_3=29, temp_max_lag_7=28,
             temp_max_roll_mean_3=29, temp_max_roll_mean_7=28,
-            temp_min=20, precipitation=0, precipitation_lag_1=0,
+            temp_min_lag_1=20, precipitation_lag_1=0,
             relative_humidity_2m_mean=50, wind_speed_10m_max=10,
             pressure_msl_mean=1013, month_sin=0, month_cos=1, month=1,
         )
@@ -135,9 +134,9 @@ class TestRainfallEndpoint:
         server._models["rainfall"] = mock
 
         features = {
-            "precipitation": 120.0, "precipitation_lag_1": 80.0,
-            "precipitation_lag_3": 30.0, "precipitation_roll_mean_3": 45.0,
-            "precipitation_roll_mean_7": 35.0, "temp_max": 32.0,
+            "precipitation_lag_1": 80.0, "precipitation_lag_3": 30.0,
+            "precipitation_lag_7": 10.0, "precipitation_roll_mean_3": 45.0,
+            "precipitation_roll_mean_7": 35.0, "temp_max_lag_1": 32.0,
             "temp_max_roll_mean_3": 31.0, "relative_humidity_2m_mean": 85.0,
             "wind_speed_10m_max": 25.0, "pressure_msl_mean": 1002.0,
             "cloud_cover_mean": 80.0, "month_sin": -0.5, "month_cos": 0.866,
@@ -153,10 +152,11 @@ class TestRainfallEndpoint:
     def test_rainfall_503_when_not_loaded(self, client: TestClient):
         server._models.clear()
         features = RainfallFeatures(
-            precipitation=10, precipitation_lag_1=5, precipitation_lag_3=2,
+            precipitation_lag_1=5, precipitation_lag_3=2, precipitation_lag_7=1,
             precipitation_roll_mean_3=3, precipitation_roll_mean_7=4,
-            temp_max=30, temp_max_roll_mean_3=29, relative_humidity_2m_mean=70,
-            wind_speed_10m_max=15, pressure_msl_mean=1013, cloud_cover_mean=60,
+            temp_max_lag_1=30, temp_max_roll_mean_3=29,
+            relative_humidity_2m_mean=70, wind_speed_10m_max=15,
+            pressure_msl_mean=1013, cloud_cover_mean=60,
             month_sin=0, month_cos=1, month=6,
         )
         resp = client.post("/predict/rainfall", json=features.model_dump())
@@ -169,7 +169,7 @@ class TestDriftEndpoint:
         from stormwatch.monitor.drift import record_prediction
         for i in range(30):
             record_prediction("cyclone", {
-                "wind_kts": float(50 + i), "lat_abs": 15.0, "lon": 80.0,
+                "lat_abs": 15.0, "lon": 80.0, "year": 2024,
             }, i)
         try:
             resp = client.post("/monitor/drift?model_name=cyclone")
@@ -182,7 +182,7 @@ class TestDriftEndpoint:
         server._models["cyclone"] = _make_mock_model()
         from stormwatch.monitor.drift import record_prediction
         for i in range(5):
-            record_prediction("cyclone", {"wind_kts": 50.0}, i)
+            record_prediction("cyclone", {"lat_abs": 15.0, "lon": 80.0}, i)
         try:
             resp = client.post("/monitor/drift?model_name=cyclone")
             assert resp.status_code in (200, 500)
@@ -194,40 +194,40 @@ class TestDriftEndpoint:
 class TestSchemas:
     def test_cyclone_features_validation(self):
         data = dict(lat_abs=15, lon=80, lat=15, pressure_min=980,
-                    dist_to_land=50, year=2024, month=10, dayofyear=285,
-                    wind_kts=80)
+                    dist_to_land=50, year=2024, month=10, dayofyear=285)
         f = CycloneFeatures(**data)
         assert f.lat_abs == 15.0
 
     def test_cyclone_features_invalid_lat_abs(self):
         with pytest.raises(Exception):
             CycloneFeatures(lat_abs=-5, lon=80, lat=10, pressure_min=1000,
-                            dist_to_land=0, year=2024, month=1, dayofyear=1,
-                            wind_kts=50)
+                            dist_to_land=0, year=2024, month=1, dayofyear=1)
 
     def test_heatwave_features_validation(self):
-        data = dict(temp_max=42, temp_max_lag_1=40, temp_max_lag_3=38,
-                    temp_max_roll_mean_3=41, temp_max_roll_mean_7=39,
-                    temp_min=28, precipitation=0, precipitation_lag_1=0,
-                    relative_humidity_2m_mean=25, wind_speed_10m_max=15,
-                    pressure_msl_mean=1008, month_sin=0.5, month_cos=0.866,
-                    month=6)
+        data = dict(
+            temp_max_lag_1=42, temp_max_lag_3=40, temp_max_lag_7=38,
+            temp_max_roll_mean_3=41, temp_max_roll_mean_7=39,
+            temp_min_lag_1=28, precipitation_lag_1=0,
+            relative_humidity_2m_mean=25, wind_speed_10m_max=15,
+            pressure_msl_mean=1008, month_sin=0.5, month_cos=0.866,
+            month=6)
         f = HeatwaveFeatures(**data)
-        assert f.temp_max == 42.0
+        assert f.temp_max_lag_1 == 42.0
 
     def test_rainfall_features_validation(self):
-        data = dict(precipitation=120, precipitation_lag_1=80,
-                    precipitation_lag_3=30, precipitation_roll_mean_3=45,
-                    precipitation_roll_mean_7=35, temp_max=32,
-                    temp_max_roll_mean_3=31, relative_humidity_2m_mean=85,
-                    wind_speed_10m_max=25, pressure_msl_mean=1002,
-                    cloud_cover_mean=80, month_sin=-0.5, month_cos=0.866,
-                    month=7)
+        data = dict(
+            precipitation_lag_1=80, precipitation_lag_3=30,
+            precipitation_lag_7=10, precipitation_roll_mean_3=45,
+            precipitation_roll_mean_7=35, temp_max_lag_1=32,
+            temp_max_roll_mean_3=31, relative_humidity_2m_mean=85,
+            wind_speed_10m_max=25, pressure_msl_mean=1002,
+            cloud_cover_mean=80, month_sin=-0.5, month_cos=0.866,
+            month=7)
         f = RainfallFeatures(**data)
-        assert f.precipitation == 120.0
+        assert f.precipitation_lag_1 == 80.0
 
     def test_get_category_description(self):
         from stormwatch.api.schemas import get_category_description
         assert "Tropical Depression" in get_category_description(0)
-        assert "Category 1" in get_category_description(2)
+        assert "Category 1" in get_category_description(1)
         assert "Unknown" in get_category_description(99)

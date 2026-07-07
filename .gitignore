@@ -16,9 +16,8 @@ coverage.xml
 # Virtual environment
 .venv/
 venv/
-.venv
 
-# Data - keep directory structure, ignore actual data files
+# Data
 data/raw/*
 data/processed/*
 data/external/*
@@ -30,7 +29,7 @@ data/external/*
 models/*
 !models/.gitkeep
 
-# MLflow tracking artifacts
+# MLflow
 mlflow/*
 !mlflow/.gitkeep
 mlruns/
@@ -46,24 +45,30 @@ mlruns/
 .DS_Store
 Thumbs.db
 
-# Environment & secrets
+# Secrets & logs
 .env
 *.log
 logs/
 
-# Jupyter checkpoints
+# Jupyter
 .ipynb_checkpoints/
 
-# Docker runtime data
+# Docker
 docker/data/
 
-# OS temp files
+# Temp
 *.tmp
 .openmeteo_cache.sqlite
 
-# Node.js
+# Node
 node_modules/
 
-# Generated docs
+# Generated artifacts
+docs/StormWatch_AI_Report.docx
 docs/end_to_end_report.pdf
 docs/_report_temp.html
+
+# Graphify
+graphify-out/
+.mcp.json
+mlflow.db

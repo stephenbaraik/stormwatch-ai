@@ -6,7 +6,6 @@ Training requires real weather and cyclone data — no synthetic fallbacks.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -86,6 +85,7 @@ def train_cyclone_model(
         if use_hyperopt:
             log.info("Running Hyperopt for cyclone model...")
             best_params = _hyperopt_cyclone(X_train, y_train)
+            best_params = _cast_hyperopt_params(best_params, ["max_depth", "n_estimators", "min_child_weight"])
             mlflow.log_params({f"hyperopt_{k}": v for k, v in best_params.items()})
             log.info("Best params: %s", best_params)
 
@@ -107,16 +107,8 @@ def train_cyclone_model(
         # Log feature importance
         _log_feature_importance(model, X.columns)
 
-        # Save model
-        models_dir = Path(config.api.model_path)
-        models_dir.mkdir(parents=True, exist_ok=True)
-        model_path = models_dir / "cyclone_model.pkl"
-        joblib.dump(model, model_path)
-        mlflow.log_artifact(str(model_path))
-        log.info("Saved cyclone model to %s", model_path)
-
-        # Log test predictions
-        _log_prediction_samples(model, X_test, y_test, "cyclone")
+        # Save and register model
+        _save_and_register(model, "cyclone", config)
 
         log.info(
             "Cyclone model trained: test_accuracy=%.3f, test_f1=%.3f",
@@ -161,6 +153,7 @@ def train_heatwave_model(
         if use_hyperopt:
             log.info("Running Hyperopt for heatwave model...")
             best_params = _hyperopt_heatwave(X_train, y_train)
+            best_params = _cast_hyperopt_params(best_params, ["max_depth", "n_estimators", "scale_pos_weight"])
             mlflow.log_params({f"hyperopt_{k}": v for k, v in best_params.items()})
             log.info("Best params: %s", best_params)
 
@@ -182,14 +175,7 @@ def train_heatwave_model(
 
         _log_feature_importance(model, X.columns)
 
-        models_dir = Path(config.api.model_path)
-        models_dir.mkdir(parents=True, exist_ok=True)
-        model_path = models_dir / "heatwave_model.pkl"
-        joblib.dump(model, model_path)
-        mlflow.log_artifact(str(model_path))
-        log.info("Saved heatwave model to %s", model_path)
-
-        _log_prediction_samples(model, X_test, y_test, "heatwave")
+        _save_and_register(model, "heatwave", config)
 
         log.info(
             "Heatwave model trained: test_accuracy=%.3f, test_auc=%.3f",
@@ -234,6 +220,7 @@ def train_rainfall_model(
         if use_hyperopt:
             log.info("Running Hyperopt for rainfall model...")
             best_params = _hyperopt_rainfall(X_train, y_train)
+            best_params = _cast_hyperopt_params(best_params, ["max_depth", "n_estimators", "scale_pos_weight"])
             mlflow.log_params({f"hyperopt_{k}": v for k, v in best_params.items()})
 
         model = RainfallXGBModel(
@@ -254,14 +241,7 @@ def train_rainfall_model(
 
         _log_feature_importance(model, X.columns)
 
-        models_dir = Path(config.api.model_path)
-        models_dir.mkdir(parents=True, exist_ok=True)
-        model_path = models_dir / "rainfall_model.pkl"
-        joblib.dump(model, model_path)
-        mlflow.log_artifact(str(model_path))
-        log.info("Saved rainfall model to %s", model_path)
-
-        _log_prediction_samples(model, X_test, y_test, "rainfall")
+        _save_and_register(model, "rainfall", config)
 
         log.info(
             "Rainfall model trained: test_accuracy=%.3f, test_auc=%.3f",
@@ -532,6 +512,21 @@ def _hyperopt_rainfall(X: pd.DataFrame, y: pd.Series) -> Dict[str, Any]:
 # ──────────────────────────────────────────────
 
 
+def _cast_hyperopt_params(
+    params: Dict[str, Any], int_keys: list[str]
+) -> Dict[str, Any]:
+    """Cast hyperopt float params to native Python ints.
+
+    hp.quniform returns np.float64 values, but XGBoost requires int for
+    n_estimators, max_depth, min_child_weight, and scale_pos_weight.
+    """
+    result = dict(params)
+    for k in int_keys:
+        if k in result:
+            result[k] = int(result[k])
+    return result
+
+
 def _log_feature_importance(model: Any, feature_names: pd.Index) -> None:
     """Log feature importance to MLflow."""
     try:
@@ -551,31 +546,61 @@ def _log_feature_importance(model: Any, feature_names: pd.Index) -> None:
         log.warning("Failed to log feature importance: %s", e)
 
 
-def _log_prediction_samples(
-    model: Any, X_test: pd.DataFrame, y_test: pd.Series, prefix: str
-) -> None:
-    """Log sample predictions to MLflow as a JSON artifact."""
+def _save_and_register(model: Any, name: str, config: Any) -> None:
+    """Save model to disk (fallback) and log to MLflow registry.
+
+    Steps:
+    1. Save .pkl to disk for local fallback loading
+    2. Log model to MLflow with signature and input example
+    3. Register model in MLflow registry
+    4. Set alias 'Production' on the new version
+    """
+    import mlflow
+    from mlflow import MlflowClient
+
+    # Save to disk as local fallback
+    models_dir = Path(config.api.model_path)
+    models_dir.mkdir(parents=True, exist_ok=True)
+    disk_path = models_dir / f"{name}_model.pkl"
+    model.save(str(disk_path))
+    log.info("Saved %s model to %s", name, disk_path)
+
+    # Log to MLflow with signature
     try:
-        y_pred = model.predict(X_test)
-        y_proba = model.predict_proba(X_test)
+        uri = config.training.mlflow_tracking_uri
+        mlflow.set_tracking_uri(uri)
+        mlflow.set_registry_uri(uri)
 
-        samples = pd.DataFrame(
-            {
-                "true": y_test.values[:50],
-                "predicted": y_pred[:50],
-                "probability": (
-                    y_proba[:50, 1]
-                    if y_proba.ndim > 1 and y_proba.shape[1] > 1
-                    else y_proba[:50, 0]
-                ),
-            }
+        # Ensure artifact root is set for local filesystem storage
+        import os
+        artifact_root = os.path.abspath("./mlruns")
+        os.makedirs(artifact_root, exist_ok=True)
+
+        model_uri = model.log_model("model")
+        run_id = mlflow.active_run().info.run_id
+        registered_name = f"stormwatch-{name}"
+
+        client = MlflowClient(tracking_uri=config.training.mlflow_tracking_uri)
+        try:
+            client.create_registered_model(registered_name)
+        except Exception:
+            pass
+
+        mv = client.create_model_version(
+            name=registered_name,
+            source=f"runs:/{run_id}/model",
+            run_id=run_id,
         )
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            samples.to_json(f, orient="records", indent=2)
-            mlflow.log_artifact(f.name, artifact_path="predictions")
+        client.set_registered_model_alias(
+            registered_name, "Production", mv.version
+        )
+        log.info(
+            "Registered %s v%d as '%s' (Production alias)",
+            registered_name, mv.version, mv.version,
+        )
     except Exception as e:
-        log.warning("Failed to log prediction samples: %s", e)
+        log.warning("Failed to register model in MLflow: %s", e)
+        log.info("Disk fallback available at %s", disk_path)
 
 
 # ──────────────────────────────────────────────

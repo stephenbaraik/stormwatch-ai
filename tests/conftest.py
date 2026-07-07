@@ -97,11 +97,10 @@ def mock_cyclone_df() -> pd.DataFrame:
 
 @pytest.fixture
 def cyclone_model() -> CycloneIntensityModel:
+    from stormwatch.features.builder import CYCLONE_FEATURES
+
     model = CycloneIntensityModel()
-    model.feature_names = [
-        "lat_abs", "lon", "lat", "pressure_min", "dist_to_land",
-        "year", "month", "dayofyear", "wind_kts",
-    ]
+    model.feature_names = list(CYCLONE_FEATURES)
     return model
 
 
@@ -153,20 +152,18 @@ def sample_cyclone_features() -> Dict[str, Any]:
         "year": 2024,
         "month": 10,
         "dayofyear": 285,
-        "wind_kts": 80.0,
     }
 
 
 @pytest.fixture
 def sample_heatwave_features() -> Dict[str, Any]:
     return {
-        "temp_max": 42.0,
-        "temp_max_lag_1": 40.0,
-        "temp_max_lag_3": 38.0,
+        "temp_max_lag_1": 42.0,
+        "temp_max_lag_3": 40.0,
+        "temp_max_lag_7": 38.0,
         "temp_max_roll_mean_3": 41.0,
-        "temp_max_roll_mean_7": 39.0,
-        "temp_min": 28.0,
-        "precipitation": 0.0,
+        "temp_max_roll_mean_7": 39.5,
+        "temp_min_lag_1": 28.0,
         "precipitation_lag_1": 0.0,
         "relative_humidity_2m_mean": 25.0,
         "wind_speed_10m_max": 15.0,
@@ -180,12 +177,12 @@ def sample_heatwave_features() -> Dict[str, Any]:
 @pytest.fixture
 def sample_rainfall_features() -> Dict[str, Any]:
     return {
-        "precipitation": 120.0,
         "precipitation_lag_1": 80.0,
         "precipitation_lag_3": 30.0,
+        "precipitation_lag_7": 10.0,
         "precipitation_roll_mean_3": 45.0,
         "precipitation_roll_mean_7": 35.0,
-        "temp_max": 32.0,
+        "temp_max_lag_1": 32.0,
         "temp_max_roll_mean_3": 31.0,
         "relative_humidity_2m_mean": 85.0,
         "wind_speed_10m_max": 25.0,

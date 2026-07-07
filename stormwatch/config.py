@@ -18,9 +18,9 @@ from pydantic import BaseModel
 
 
 class IBTrACSConfig(BaseModel):
-    url: str = "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.IO.list.v04r01.csv"
+    url: str = "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.NI.list.v04r01.csv"
     filename: str = "ibtracs_cyclones.csv"
-    basin: str = "IO"
+    basin: str = "NI"
 
 
 class OpenMeteoConfig(BaseModel):
@@ -66,6 +66,7 @@ class RainfallModelConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     mlflow_tracking_uri: str = "sqlite:///mlflow/mlflow.db"
+    mlflow_artifact_uri: str = "./mlruns"
     experiment_name: str = "stormwatch-ai"
     cv_folds: int = 5
 

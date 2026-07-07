@@ -20,9 +20,9 @@ data:
 
   # IBTrACS cyclone data (NOAA)
   ibtracs:
-    url: "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.IO.list.v04r01.csv"
+    url: "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.NI.list.v04r01.csv"
     filename: "ibtracs_cyclones.csv"
-    basin: "IO"  # Indian Ocean
+    basin: "NI"  # North Indian Ocean (Bay of Bengal / Arabian Sea)
 
   # IMD datasets
   imd:
@@ -31,16 +31,14 @@ data:
 
 features:
   cyclone:
-    - "lat"
+    - "lat_abs"
     - "lon"
-    - "wind_max"
+    - "lat"
     - "pressure_min"
+    - "dist_to_land"
     - "year"
     - "month"
-    - "lat_abs"
-    - "wind_gust"
-    - "pressure_trend"
-    - "wind_trend"
+    - "dayofyear"
 
 models:
   cyclone_intensity:

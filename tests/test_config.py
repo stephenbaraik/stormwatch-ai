@@ -154,7 +154,7 @@ class TestConfigLoader:
 class TestDataConfig:
     def test_ibtracs_config(self):
         cfg = DataConfig()
-        assert cfg.ibtracs.basin == "IO"
+        assert cfg.ibtracs.basin == "NI"
 
     def test_ibtracs_url_default(self):
         cfg = DataConfig()

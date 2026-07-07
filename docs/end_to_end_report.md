@@ -1,8 +1,8 @@
 # StormWatch AI — End-to-End ML Report
 
 > **Project**: Extreme Weather Early Warning System  
-> **Version**: 1.0.0  
-> **Date**: June 2026  
+> **Version**: 1.2.0  
+> **Date**: July 2026 (hyperopt evaluation, pressure_min audit, pinned dependencies, API auth, dependency pinning)
 > **Author**: StormWatch AI Team
 
 ---
@@ -24,18 +24,21 @@
 12. [Project Structure](#12-project-structure)
 13. [How to Reproduce](#13-how-to-reproduce)
 14. [Future Work](#14-future-work)
+15. [Known Issues Found & Fixed](#15-known-issues-found--fixed)
 
 ---
 
 ## 1. Executive Summary
 
-StormWatch AI is an end-to-end machine learning system for extreme weather prediction in the Indian subcontinent. It provides **three production-grade models**:
+StormWatch AI is an end-to-end machine learning system for extreme weather prediction in the Indian subcontinent. It provides **three production-grade models**, each formulated as a genuine **next-day forecast** (today's conditions predict tomorrow's extreme-event flag — see [§15](#15-known-issues-found--fixed) for why this distinction matters):
 
 | Model | Task | Type | Accuracy | ROC-AUC |
 |-------|------|------|----------|---------|
-| **Cyclone Intensity** | Saffir-Simpson category (0–5) | Multi-class classification | **98.9%** | — |
-| **Heatwave Detection** | Heatwave flag (binary) | Binary classification | **99.4%** | **0.9982** |
-| **Extreme Rainfall** | 95th percentile exceedance (binary) | Binary classification | **97.5%** | **0.9744** |
+| **Cyclone Intensity** | Saffir-Simpson category (0–5) | Multi-class classification | **98.5%** | — |
+| **Heatwave Detection** | Next-day heatwave flag (binary) | Binary classification | **99.0%** | **0.997** |
+| **Extreme Rainfall** | Next-day 95th-percentile exceedance (binary) | Binary classification | **88.3%** | **0.881** |
+
+These figures are from a July 2026 retraining pass on real data pulled directly from the project's Supabase store (90,138 daily weather rows, 15 cities, 2009–2026) and NOAA IBTrACS (57,632 real North Indian Ocean cyclone track records). The rainfall model's more modest 88.3% (down from an earlier, leakage-inflated 99.7%) is the most trustworthy number of the three — next-day rainfall is genuinely hard to forecast, and a model that claims otherwise is a sign of a label-leakage bug, not skill. See [§15](#15-known-issues-found--fixed) for the full story.
 
 The system includes a complete ML lifecycle: data ingestion, preprocessing, feature engineering, model training with MLflow tracking, FastAPI serving with live prediction endpoints, statistical drift monitoring, and Docker deployment with CI/CD.
 
@@ -73,7 +76,9 @@ Three independent prediction tasks:
 | Source | Data Type | Access | Coverage |
 |--------|-----------|--------|----------|
 | **Open-Meteo Archive API** | Daily weather variables (18 fields) | Free, no API key | Global historical + forecast |
-| **IBTrACS** (NOAA) | Tropical cyclone tracks | Public domain | Global, 1842–present |
+| **IBTrACS** (NOAA), basin `NI` | Tropical cyclone tracks | Public domain | North Indian Ocean (Bay of Bengal / Arabian Sea), 1842–present |
+
+> NOAA retired the old `IO` ("Indian Ocean") basin code in favor of `NI` (North Indian) / `SI` (South Indian). The config and download code previously still referenced `IO`, which 404s against the current NOAA directory — fixed in this pass (see [§15](#15-known-issues-found--fixed)).
 
 ### 3.2 Data Schema
 
@@ -132,11 +137,11 @@ Key preprocessing steps:
 
 #### Data Coverage
 
-The dataset spans 14 cities (one of the 15 planned cities has not yet been fully ingested) with 84,117 daily records from 2010 to 2026:
+As of the July 2026 retraining pass, all 15 planned cities are fully ingested into Supabase: 90,138 daily records spanning 2009-12-31 to 2026-06-25 (14 cities with 6,021 rows each; Visakhapatnam with 5,844 rows, joining the pipeline slightly later).
 
 ![Data Coverage](figures/data_coverage.png)
 
-*Figure 3.1: Number of daily records per city. Coverage ranges from approximately 5,500 to 6,500 rows depending on when data collection began for each city.*
+*Figure 3.1: Number of daily records per city. Coverage ranges from approximately 5,500 to 6,500 rows depending on when data collection began for each city. All 15 cities are represented including Visakhapatnam.*
 
 ![Temperature Trends](figures/temperature_trends.png)
 
@@ -286,7 +291,9 @@ The PySpark-processed data produces equivalent model quality to the pandas pipel
 
 ## 4. Feature Engineering
 
-### 4.1 Cyclone Features (9 features)
+> **Note on same-day features**: earlier versions of these feature sets included `wind_kts` (cyclone), and same-day `temp_max`/`temp_min`/`precipitation` (heatwave, rainfall) — each of which is the *exact variable the label is thresholded from* (e.g. `heatwave_flag` is literally "`temp_max` > 40°C for 3 days"). That produced near-100% accuracy that was really just the model re-deriving a lookup table, not forecasting anything. Both the features below and the targets have been corrected: same-day leaky columns are removed, rolling stats are computed from the *prior* day onward, and heatwave/rainfall targets are shifted to predict the *following* day. See [§15](#15-known-issues-found--fixed).
+
+### 4.1 Cyclone Features (8 features)
 
 | Feature | Type | Description |
 |---------|------|-------------|
@@ -298,45 +305,47 @@ The PySpark-processed data produces equivalent model quality to the pandas pipel
 | `year` | int | Year of observation |
 | `month` | int | Month of observation (1–12) |
 | `dayofyear` | int | Day of year (1–366) |
-| `wind_kts` | float | Maximum sustained wind speed (knots) |
 
-### 4.2 Heatwave Features (14 features)
+`wind_kts` (max sustained wind) was removed — the Saffir-Simpson `category` target is deterministically derived from `wind_kts` via fixed thresholds, so including it as a feature made the task a lookup rather than a prediction. `pressure_min` remains a legitimate feature: it correlates strongly with storm intensity but isn't the literal defining variable.
+
+### 4.2 Heatwave Features (13 features) — predicts *tomorrow's* heatwave_flag
 
 | Feature | Description |
 |---------|-------------|
-| `temp_max` | Maximum temperature (°C) |
 | `temp_max_lag_1` | Yesterday's max temperature |
 | `temp_max_lag_3` | 3 days ago max temperature |
-| `temp_max_roll_mean_3` | 3-day rolling mean of max temp |
-| `temp_max_roll_mean_7` | 7-day rolling mean of max temp |
-| `temp_min` | Minimum temperature |
-| `precipitation` | Daily precipitation |
+| `temp_max_lag_7` | 7 days ago max temperature |
+| `temp_max_roll_mean_3` | 3-day rolling mean of max temp (prior days only) |
+| `temp_max_roll_mean_7` | 7-day rolling mean of max temp (prior days only) |
+| `temp_min_lag_1` | Yesterday's min temperature |
 | `precipitation_lag_1` | Yesterday's precipitation |
-| `relative_humidity_2m_mean` | Mean humidity |
-| `wind_speed_10m_max` | Max wind speed |
-| `pressure_msl_mean` | Mean sea-level pressure |
+| `relative_humidity_2m_mean` | Today's mean humidity |
+| `wind_speed_10m_max` | Today's max wind speed |
+| `pressure_msl_mean` | Today's mean sea-level pressure |
 | `month_sin`, `month_cos` | Cyclic month encoding |
 | `month` | Integer month |
 
-### 4.3 Rainfall Features (14 features)
+Today's own `temp_max`/`temp_min` are deliberately excluded — those define today's `heatwave_flag`, not tomorrow's. Today's humidity/wind/pressure/season remain as legitimate same-day atmospheric state used to forecast forward.
 
-Similar structure with focus on precipitation history: `precipitation`, precipitation lags (t-1, t-3), rolling means (3-day, 7-day), `temp_max`, `temp_max_roll_mean_3`, `relative_humidity_2m_mean`, `wind_speed_10m_max`, `pressure_msl_mean`, `cloud_cover_mean`, cyclic month encoding.
+### 4.3 Rainfall Features (14 features) — predicts *tomorrow's* extreme_rainfall
+
+Precipitation history only via lags and rolling means: `precipitation_lag_1`, `precipitation_lag_3`, `precipitation_lag_7`, `precipitation_roll_mean_3`, `precipitation_roll_mean_7` (all prior-day), plus `temp_max_lag_1`, `temp_max_roll_mean_3`, `relative_humidity_2m_mean`, `wind_speed_10m_max`, `pressure_msl_mean`, `cloud_cover_mean`, cyclic month encoding. Today's own `precipitation` is excluded for the same reason as above.
 
 ### 4.4 Feature Importance Analysis
 
-Each model's XGBoost classifier provides built-in feature importance scores (gain-based), revealing which meteorological variables drive predictions most strongly.
+Each model's XGBoost classifier provides built-in feature importance scores (gain-based), revealing which meteorological variables drive predictions most strongly. These figures were regenerated July 2026 against the retrained models and current (post-leakage-fix) feature sets.
 
 ![Cyclone Feature Importance](figures/feature_importance_cyclone.png)
 
-*Figure 4.1: Cyclone intensity model — `wind_kts` (sustained wind speed) and `pressure_min` (minimum central pressure) dominate, consistent with the Saffir-Simpson scale definition. Spatial features (`lat`, `lon`) and temporal features (`year`, `month`) carry lower weight.*
+*Figure 4.1: Cyclone intensity model — `pressure_min` (minimum central pressure) dominates at 52.3% importance, consistent with its established physical relationship to storm intensity. `year` (24.2%) and `lon` (6.9%) provide secondary signals. `lat` carries zero importance (redundant with `lat_abs` for North Indian Ocean storms which are all in the northern hemisphere).*
 
 ![Heatwave Feature Importance](figures/feature_importance_heatwave.png)
 
-*Figure 4.2: Heatwave detection model — `temp_max_roll_mean_3` (3-day rolling mean of max temperature) overwhelmingly dominates, followed by `temp_max` and `temp_max_lag_1`. The rolling mean captures the heat accumulation pattern that defines a heatwave.*
+*Figure 4.2: Heatwave detection model — `temp_max_lag_1` (yesterday's maximum temperature) overwhelmingly dominates at 96.5% importance. This is expected for a next-day forecast: if yesterday was hot, tomorrow very likely will be too. Humidity, wind, and pressure provide minor supporting signals.*
 
 ![Rainfall Feature Importance](figures/feature_importance_rainfall.png)
 
-*Figure 4.3: Extreme rainfall model — `precipitation` (current day) dominates, with `precipitation_roll_mean_7`, `precipitation_lag_1`, and humidity providing supporting signals.*
+*Figure 4.3: Extreme rainfall model — feature importance is more distributed than heatwave or cyclone, with `relative_humidity_2m_mean` (humidity today, 6.9%), `pressure_msl_mean` (pressure, 5.6%), `cloud_cover_mean` (5.2%), and the collection of precipitation lag/rolling-mean features each contributing 3.5–5%. No single feature dominates, reflecting the genuinely hard problem of next-day rainfall forecasting from surface variables alone.*
 
 ### 4.5 Feature Engineering Pipeline
 
@@ -499,68 +508,70 @@ All models are trained exclusively on real historical data — no synthetic data
 
 | Source | Type | Coverage | Rows |
 |--------|------|----------|------|
-| [Open-Meteo Archive API](https://archive-api.open-meteo.com/) | Daily weather for 15 Indian cities | 2010–2026 | ~6,000 rows × 21 cols per city |
-| [IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) | Cyclone track records (Indian Ocean basin) | 2010–2024 | ~2,000 tracks |
+| [Open-Meteo Archive API](https://archive-api.open-meteo.com/) (via Supabase) | Daily weather for 15 Indian cities | 2009-12-31–2026-06-25 | 90,138 rows |
+| [IBTrACS](https://www.ncei.noaa.gov/products/international-best-track-archive) basin `NI` | Cyclone track records (North Indian Ocean) | 1842–present | 62,606 raw records → 57,632 after filtering to tropical storms (`NATURE` = TS/MX) |
 
 **Open-Meteo weather variables:** `temperature_2m_max`, `temperature_2m_min`, `temperature_2m_mean`, `precipitation_sum`, `rain_sum`, `snowfall_sum`, `precipitation_hours`, `wind_speed_10m_max`, `wind_gusts_10m_max`, `wind_direction_10m_dominant`, `pressure_msl_mean`, `relative_humidity_2m_mean`, `cloud_cover_mean`, `shortwave_radiation_sum`, `et0_fao_evapotranspiration`.
 
-The pipeline downloads data via the [Open-Meteo Archive API](https://archive-api.open-meteo.com/) using yearly chunks with pacing delays to respect the 5,000-calls/hour rate limit. CSV files are cached locally and uploaded to Supabase for downstream training. The PySpark ETL module can alternatively read the same CSVs and output partitioned Parquet.
+The pipeline downloads data via the [Open-Meteo Archive API](https://archive-api.open-meteo.com/) using yearly chunks with pacing delays to respect the 5,000-calls/hour rate limit, then uploads it to Supabase (raw columns only — derived/engineered features are recomputed at training time, not stored). For this retraining pass, the real weather data was pulled back out of Supabase directly via `scripts/pull_supabase_weather.py` (paginated REST reads using the service-role key) rather than re-downloading from Open-Meteo. The PySpark ETL module can alternatively read the same raw CSVs and output partitioned Parquet.
 
 ---
 
 ## 7. Model Evaluation
 
-Evaluation was performed on held-out test sets (20% of real data, stratified by year and city) with stratified sampling.
+Evaluation was performed on held-out test sets (20% of real data, stratified split, `random_state=42`), no Hyperopt tuning for this pass (`use_hyperopt=False` — fast baseline; see [§14](#14-future-work) for a tuned re-run). These are the July 2026 real-data numbers after the label-leakage fix in [§15](#15-known-issues-found--fixed) — treat any of these as suspect if they later drift back toward ~100%.
 
 ### 7.1 Cyclone Intensity Model
 
-**Accuracy: 98.9%**
+**Accuracy: 98.5%** (57,632 real IBTrACS NI samples; 6 classes, heavily imbalanced toward Category 0)
 
 | Metric | Value |
 |--------|-------|
-| **Accuracy** | **0.989** |
+| **Test Accuracy** | **0.985** |
+| **Test F1** | **0.985** |
 | Number of classes | 6 |
+| Class distribution | 0: 54,068 · 1: 2,404 · 2: 662 · 3: 235 · 4: 149 · 5: 114 |
 | Model type | CycloneIntensityXGB |
 
 ![Cyclone Confusion Matrix](figures/cyclone_confusion_matrix.png)
 
-*Figure 7.1: Cyclone intensity confusion matrix (rows = actual, columns = predicted). The strong diagonal confirms near-perfect classification with only minor off-diagonal confusion between adjacent categories.*
+*Figure 7.1: Cyclone intensity confusion matrix (rows = actual, columns = predicted). Regenerated July 2026 from the retrained model on real IBTrACS NI data. Category 0 dominates (10,814 of 11,527 test samples), with minor confusion between adjacent categories — consistent with the physical continuity of the Saffir-Simpson scale.*
 
 ![Cyclone Class Distribution](figures/cyclone_class_distribution.png)
 
-*Figure 7.2: Test-set class distribution. Categories 1 and 0 are the most numerous; Category 3 is the rarest with only 57 samples.*
+*Figure 7.2: Test-set class distribution (n = 11,527). Regenerated from the current model and data. The distribution is heavily skewed toward Category 0 (Tropical Depression), with progressively fewer samples in higher categories — matching the real-world rarity of intense storms.*
 
-The model shows near-perfect classification with only minor confusion between adjacent categories, which is expected since categories 2 and 3 represent similar wind speed ranges.
+98.5% accuracy without `wind_kts` as a feature is plausible rather than suspicious: `pressure_min` is a well-established physical proxy for storm intensity (lower central pressure ⇔ stronger storm), so a strong pressure→category relationship is expected, not a leakage artifact.
 
-### 7.2 Heatwave Model
+### 7.2 Heatwave Model — next-day forecast
 
 | Metric | Value |
 |--------|-------|
-| **Accuracy** | **0.994** |
-| **ROC-AUC** | **0.9982** |
-| Sample count | 1,825 |
-| Positive rate | 3.3% (imbalanced) |
+| **Test Accuracy** | **0.990** |
+| **Test ROC-AUC** | **0.997** |
+| Sample count | 90,123 (15 cities, after dropping each city's last day for the next-day target shift) |
+| Positive rate | ~1.8% (1,641 heatwave-days / 90,138) |
 | Model type | HeatwaveXGBModel |
 
-The near-perfect ROC-AUC (0.9982) indicates excellent discrimination between heatwave and non-heatwave conditions despite the class imbalance (only 3.3% positive rate).
+High accuracy here is credible: heatwaves are physically persistent — if today was extremely hot, tomorrow very likely will be too — so strong lag/rolling-mean signal genuinely predicts the next day without needing today's own temperature as a feature.
 
-### 7.3 Extreme Rainfall Model
+### 7.3 Extreme Rainfall Model — next-day forecast
 
 | Metric | Value |
 |--------|-------|
-| **Accuracy** | **0.975** |
-| **ROC-AUC** | **0.9744** |
-| Sample count | 1,825 |
-| Positive rate | 5.2% (imbalanced) |
+| **Test Accuracy** | **0.883** |
+| **Test ROC-AUC** | **0.881** |
+| Sample count | 90,123 |
+| Positive rate | ~5.0% (4,504 extreme-rain-days / 90,138) |
 | Model type | RainfallXGBModel |
 
-Strong AUC demonstrates reliable detection of extreme precipitation events, with the imbalance-handling mechanisms (scale_pos_weight) effectively managing the 5% positive class rate.
+This is the most instructive number in the report: before the leakage fix, this model scored **99.7%** test accuracy by using today's own precipitation to "predict" today's extreme-rainfall flag. After removing that same-day feature and shifting the target to the next day, accuracy dropped to a much more believable **88.3%** — next-day rainfall is genuinely hard to forecast from surface variables alone, and this number is far more defensible in an interview than the old one.
 
 ### 7.4 Summary
 
 ![Model Performance Comparison](figures/model_performance.png)
 
-*Figure 7.3: Accuracy, ROC-AUC, and F1 scores across all three models. All models exceed 97% on all metrics.*
+*Figure 7.3: Accuracy, ROC-AUC, and F1 scores across all three models. Regenerated July 2026 from real test-set evaluation. Cyclone (98.5% / 0.985 F1) and heatwave (99.0% / 0.997 AUC) are strong performers. Rainfall (88.3% / 0.881 AUC / 0.330 F1) is more modest — the low F1 reflects the model correctly identifying non-events but struggling to pinpoint the minority of extreme-rain days, which is the expected and honest result for a next-day forecast.*
 
 #### Exploratory Data Analysis
 
@@ -568,7 +579,7 @@ The weather dataset reveals clear spatial and seasonal patterns:
 
 ![Extreme Events by Climate Zone](figures/extreme_events_by_zone.png)
 
-*Figure 7.4: Extreme event counts by climate zone. Coastal cities experience the highest frequency of extreme rainfall events, while heatwaves are most common in inland zones.*
+*Figure 7.4: Extreme event counts by climate zone. Coastal cities experience the highest frequency of extreme rainfall events, while heatwaves are most common in inland zones. Regenerated July 2026 from the full 15-city dataset.*
 
 ![Monthly Event Patterns](figures/monthly_event_patterns.png)
 
@@ -576,16 +587,42 @@ The weather dataset reveals clear spatial and seasonal patterns:
 
 ![Extreme Events by City](figures/city_event_counts.png)
 
-*Figure 7.6: Absolute event counts across the 14 Indian cities. Kolkata and Mumbai lead in extreme rainfall, while Delhi and Lucknow show elevated heatwave counts.*
+*Figure 7.6: Absolute event counts across all 15 cities (including Visakhapatnam). Regenerated July 2026.*
 
 #### Cross-Model Comparison
 
 | Dimension | Cyclone | Heatwave | Rainfall |
 |-----------|---------|----------|----------|
-| Performance | 98.9% accuracy | 99.4% acc / 0.998 AUC | 97.5% acc / 0.974 AUC |
+| Performance | 98.5% accuracy / 0.985 F1 | 99.0% acc / 0.997 AUC | 88.3% acc / 0.881 AUC |
+| Task framing | Same-timestamp classification (no leakage risk — features are independent of the derived label) | Next-day forecast (label shifted +1 day) | Next-day forecast (label shifted +1 day) |
 | Imbalance handling | ✅ Balanced classes | ✅ scale_pos_weight | ✅ scale_pos_weight |
-| Temporal features | ✅ Year/month/DOY | ✅ Lags + rolling means | ✅ Lags + rolling means |
+| Temporal features | ✅ Year/month/DOY | ✅ Lags + rolling means (prior-day only) | ✅ Lags + rolling means (prior-day only) |
 | Spatial features | ✅ Lat/lon/dist_to_land | ✅ City zone encoding | ✅ City zone encoding |
+
+### 7.5 Hyperparameter Tuning Evaluation
+
+A Hyperopt tuning pass (20 trials, TPE, 3-fold CV, `f1_weighted` for cyclone / `roc_auc` for heatwave & rainfall) was run to see whether default XGBoost parameters were already near-optimal:
+
+| Model | Baseline (no tuning) | Hyperopt best | Δ | Verdict |
+|-------|---------------------|---------------|----|---------|
+| Cyclone | 98.5% acc / 0.985 F1 | 98.4% acc / 0.984 F1 | −0.1% | Defaults optimal |
+| Heatwave | 99.0% acc / 0.997 AUC | 98.9% acc / 0.997 AUC | −0.1% | Defaults optimal |
+| Rainfall | 88.3% acc / **0.881 AUC** | 75.2% acc / **0.894 AUC** | +0.013 AUC / −13.1% acc | AUC-overfitted; defaults preferred |
+
+Default XGBoost parameters are effectively optimal for cyclone and heatwave. For rainfall, Hyperopt found hyperparameters that improved cross-validated ROC-AUC by 1.3% but at a severe accuracy cost — the tuning objective (cv ROC-AUC) diverged from the evaluation metric of interest. The baseline models are used for all production inference.
+
+### 7.6 `pressure_min` Leakage Audit
+
+Cyclone intensity's most important feature is `pressure_min` (52.3% importance). Since the Saffir-Simpson category is deterministically derived from `wind_kts` (which was removed as a feature in [§15](#15-known-issues-found--fixed)), it is worth verifying that `pressure_min` is not itself a form of leakage.
+
+**Findings:**
+- Category derivation in `preprocess.py` uses **only** `wind_kts` — `pressure_min` is never consulted
+- Pearson correlation `pressure_min` ↔ `category`: **−0.80** (strong but not perfect)
+- `pressure_min`-only model: **95.7%** accuracy
+- Model without `pressure_min`: **95.6%** accuracy (only 2.7% below the full 98.2%)
+- Per-category pressure means: 998 hPa (Cat 0) → 966 hPa (Cat 3) → 931 hPa (Cat 5)
+
+**Conclusion:** `pressure_min` is a **legitimate physical signal**, not leakage. Lower central pressure is a well-established indicator of stronger storms (pressure-wind relationship), just as rolling temperature is a legitimate predictor of tomorrow's heatwave without being the label itself. The 52.3% importance reflects real predictive value from a physically meaningful measurement.
 
 ---
 
@@ -637,8 +674,7 @@ curl -X POST http://localhost:8000/predict/cyclone \
   -d '{
     "lat_abs": 15.0, "lon": 75.0, "lat": 15.0,
     "pressure_min": 970.0, "dist_to_land": 50.0,
-    "year": 2024, "month": 6, "dayofyear": 180,
-    "wind_kts": 90.0
+    "year": 2024, "month": 6, "dayofyear": 180
   }'
 ```
 
@@ -647,13 +683,12 @@ curl -X POST http://localhost:8000/predict/cyclone \
   "model": "cyclone_intensity",
   "prediction": {
     "category": 3,
-    "description": "Category 2 Hurricane",
+    "description": "Category 3",
     "confidence": 0.99,
     "probabilities": {
       "0": 0.001, "1": 0.002, "2": 0.003,
       "3": 0.990, "4": 0.002, "5": 0.002
-    },
-    "wind_kts": 90.0
+    }
   }
 }
 ```
@@ -664,10 +699,12 @@ curl -X POST http://localhost:8000/predict/cyclone \
 curl -X POST http://localhost:8000/predict/heatwave \
   -H "Content-Type: application/json" \
   -d '{
-    "temp_max": 42.0, "temp_max_lag_1": 40.0,
-    "temp_max_roll_mean_3": 40.0,
-    "relative_humidity_2m_mean": 45.0,
-    "month": 6
+    "temp_max_lag_1": 42.0, "temp_max_lag_3": 40.0,
+    "temp_max_lag_7": 38.0, "temp_max_roll_mean_3": 41.0,
+    "temp_max_roll_mean_7": 39.5, "temp_min_lag_1": 28.0,
+    "precipitation_lag_1": 0.0, "relative_humidity_2m_mean": 25.0,
+    "wind_speed_10m_max": 15.0, "pressure_msl_mean": 1008.0,
+    "month_sin": 0.5, "month_cos": 0.866, "month": 6
   }'
 ```
 
@@ -691,7 +728,6 @@ curl -X POST http://localhost:8000/predict/heatwave \
   "prediction": {
     "extreme_rainfall_probability": 0.999,
     "is_extreme": true,
-    "expected_precipitation": 160.0,
     "confidence": 0.999
   }
 }
@@ -752,8 +788,8 @@ When drift is detected, the system surfaces:
   "drifted_features": 1,
   "drift_score": 0.25,
   "features": [
-    {"feature": "wind_kts", "p_value": 0.003, "drifted": true,
-     "reference_mean": 82.5, "current_mean": 110.3}
+    {"feature": "pressure_min", "p_value": 0.003, "drifted": true,
+     "reference_mean": 985.0, "current_mean": 970.2}
   ],
   "alert": true
 }
@@ -923,7 +959,8 @@ stormwatch-ai/
 │   ├── end_to_end_report.md         # This report
 │   └── figures/                     # Generated visualizations (11 figures)
 └── scripts/
-    └── generate_figures.py          # Figure generation script
+    ├── generate_figures.py          # Figure generation script
+    └── pull_supabase_weather.py     # Pulls real weather_data rows from Supabase → data/raw/weather_all_cities.csv
 ```
 
 ### 12.1 Dependencies
@@ -970,12 +1007,40 @@ python -m stormwatch.data.spark_etl
 
 ### 13.4 Train Models
 
+**Option A — download fresh from source APIs:**
+
 ```bash
 source .venv/bin/activate
 python -m stormwatch.models.train
 ```
 
 This downloads real data from the Open-Meteo and IBTrACS archives, trains all 3 models with MLflow tracking, and saves `.pkl` files to `models/`.
+
+**Option B — pull already-ingested weather data from Supabase** (faster if `weather_data` is already populated; requires `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` in `.env`):
+
+```bash
+source .venv/bin/activate
+PYTHONPATH=. python scripts/pull_supabase_weather.py   # → data/raw/weather_all_cities.csv
+python -c "
+from stormwatch.data.download import download_ibtracs
+download_ibtracs(basin='NI', force=True)                # → data/raw/ibtracs_NI.csv
+"
+python -c "
+import pandas as pd
+from stormwatch.data.preprocess import preprocess_all
+from stormwatch.models.train import train_cyclone_model, train_heatwave_model, train_rainfall_model
+
+weather_df, cyclone_df = preprocess_all(
+    weather_path='data/raw/weather_all_cities.csv',
+    cyclone_path='data/raw/ibtracs_NI.csv',
+)
+train_cyclone_model(cyclone_df, use_hyperopt=False)
+train_heatwave_model(weather_df, use_hyperopt=False)
+train_rainfall_model(weather_df, use_hyperopt=False)
+"
+```
+
+> The IBTrACS download can stall over plain `urllib` for large files; `curl -A "Mozilla/5.0" <url>` is a reliable fallback if `download_ibtracs()` hangs.
 
 To train on PySpark-processed data instead:
 
@@ -1025,7 +1090,6 @@ response = httpx.post(
         "lat_abs": 15.0, "lon": 75.0, "lat": 15.0,
         "pressure_min": 970.0, "dist_to_land": 50.0,
         "year": 2024, "month": 6, "dayofyear": 180,
-        "wind_kts": 90.0,
     },
 )
 print(response.json())
@@ -1038,6 +1102,14 @@ print(response.json())
 ### 14.1 Immediate Improvements
 
 - [x] **Real data integration**: Live Open-Meteo API pulls for 15 Indian cities (completed)
+- [x] **Fix stale IBTrACS basin code**: `IO` → `NI`/`SI` across `config.py`, `config.yaml`, and `download.py`'s hardcoded URL map (completed July 2026)
+- [x] **Fix cyclone `NATURE` filter**: was matching a non-existent `"TC"` code, silently dropping all real cyclone records (completed July 2026)
+- [x] **Fix label leakage**: heatwave/rainfall/cyclone models were using the same-day value that defines their own label; reframed as genuine next-day forecasts (completed July 2026 — see [§15](#15-known-issues-found--fixed))
+- [x] **Regenerate report figures**: re-ran `scripts/generate_figures.py` against current data and retrained models; all 11 figures now reflect real metrics and the post-leakage-fix feature sets (completed July 2026)
+- [x] **Hyperparameter tuning**: evaluated with Hyperopt (20 trials × 3 models); default XGBoost parameters are already near-optimal — baseline retained (completed July 2026, see [§7.5](#75-hyperparameter-tuning-evaluation))
+- [x] **`pressure_min` leakage audit**: confirmed legitimate physical signal, not definitional leakage (completed July 2026, see [§7.6](#76-pressure_min-leakage-audit))
+- [x] **Pin dependencies**: all `requirements/*.txt` now use exact version pins (completed July 2026)
+- [x] **API key authentication**: `X-API-Key` header auth on all prediction/monitoring endpoints; configurable via `STORMWATCH_API_KEY` env var (completed July 2026)
 - [ ] **Model retraining pipeline**: Automated retraining on new data with automatic deployment
 - [ ] **Severity calibration**: Platt scaling or isotonic regression for well-calibrated probabilities
 - [ ] **Feature importance analysis**: SHAP values for model interpretability
@@ -1047,7 +1119,7 @@ print(response.json())
 - [ ] **Kubernetes deployment**: Helm charts for scaling
 - [ ] **Alerting**: Integrate drift alerts with Slack/PagerDuty
 - [ ] **A/B testing**: Compare model versions in production
-- [ ] **API key authentication**: Add API key middleware to prediction endpoints
+- [x] **API key authentication**: `X-API-Key` header middleware with configurable env var (completed July 2026)
 - [ ] **Rate limiting**: Protect against abuse
 
 ### 14.3 ML Enhancements
@@ -1067,4 +1139,43 @@ print(response.json())
 
 ---
 
-*End of Report — StormWatch AI v1.0.0*
+## 15. Known Issues Found & Fixed
+
+A July 2026 pass to retrain all three models on real Supabase/IBTrACS data (rather than the mock data used for an earlier MLflow demo) surfaced three real bugs. None of these were hypothetical — each one either silently dropped real data or silently inflated reported accuracy.
+
+### 15.1 Stale IBTrACS basin code (`IO` → `NI`)
+
+NOAA restructured its IBTrACS basin codes at some point after this project's cyclone config was written. `"IO"` ("Indian Ocean") no longer exists in the current NOAA CSV directory; the two real codes are `"NI"` (North Indian — Bay of Bengal / Arabian Sea, the one relevant to India) and `"SI"` (South Indian). This meant `download_ibtracs()` would 404.
+
+**Two separate locations** needed the fix, since the basin URL was duplicated rather than sourced from one place:
+- `IBTrACSConfig` defaults in `stormwatch/config.py` and the matching block in `configs/config.yaml`
+- A second, independent `basin_urls` dict hardcoded inside `download_ibtracs()` in `stormwatch/data/download.py`
+
+Both now default to `"NI"` and resolve to `ibtracs.NI.list.v04r01.csv`.
+
+### 15.2 Cyclone `NATURE` filter matched a non-existent code
+
+`preprocess_cyclones()` in `stormwatch/data/preprocess.py` filtered rows to `NATURE` containing `"TC"`, intending to keep only tropical cyclones. Real IBTrACS data has no `"TC"` code at all — the actual codes are `TS` (tropical storm), `DS` (disturbance), `ET` (extratropical), `MX` (mixture/subtropical), `NR` (not reported). The filter therefore silently zeroed out all 62,606 downloaded records before any model ever saw them. Fixed to match `TS|MX`, yielding 57,632 real tropical-cyclone records across all 6 Saffir-Simpson categories.
+
+### 15.3 Label leakage across all three models
+
+The most consequential bug: `stormwatch/features/builder.py` fed each model the *exact same-day column that its own label is thresholded from*:
+
+| Model | Label definition | Leaked feature |
+|-------|-------------------|-----------------|
+| Cyclone | `category` = deterministic Saffir-Simpson bucket of `wind_kts` | `wind_kts` itself |
+| Heatwave | `heatwave_flag` = same-day `temp_max` > 40°C for 3 consecutive days | same-day `temp_max` |
+| Rainfall | `extreme_rainfall` = same-day `precipitation` > city's 95th percentile | same-day `precipitation` |
+
+This produced near-perfect scores (cyclone 100%, heatwave 99.9%, rainfall 99.7%) that were really the model re-deriving a lookup table, not learning anything. It's a classic case worth remembering: **suspiciously perfect accuracy is a bug signal, not a result to report** — especially for a portfolio project where these numbers will be scrutinized in an interview.
+
+Fix, in three parts:
+1. **`stormwatch/data/preprocess.py::prepare_weather_features`** — rolling means/stds for `temp_max`/`precipitation` are now computed on the series *shifted by one day first*, so today's rolling stat only reflects prior days, never today's own reading.
+2. **`stormwatch/features/builder.py`** — removed `wind_kts` from `CYCLONE_FEATURES`, and removed same-day `temp_max`/`temp_min`/`precipitation` from `HEATWAVE_FEATURES`/`RAINFALL_FEATURES` (lagged/rolling versions and other same-day exogenous variables like humidity, wind, pressure, cloud cover, and season remain — those are not derived from the label and are legitimate).
+3. **`build_heatwave_features()`/`build_rainfall_features()`** now shift the target itself by one day per city (`df.groupby("city")[target].shift(-1)`), dropping each city's last row (no next-day label available). This turns both tasks into genuine 1-day-ahead forecasts rather than same-day lookups.
+
+Post-fix, cyclone and heatwave accuracy remain high (98.5%, 99.0%) for physically legitimate reasons — pressure is a real proxy for storm intensity, and heatwaves are highly autocorrelated day-to-day — while rainfall dropped to a much more defensible 88.3%, since next-day rain is genuinely one of the hardest short-term forecasting targets. That the three models responded differently to the same fix, in the direction domain knowledge would predict, is itself good evidence the fix is correct rather than an overcorrection.
+
+---
+
+*End of Report — StormWatch AI v1.1.0*

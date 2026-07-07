@@ -173,14 +173,14 @@ INDIAN_CITIES: List[Dict[str, Any]] = [
 
 def download_ibtracs(
     save_dir: Optional[str] = None,
-    basin: str = "IO",
+    basin: str = "NI",
     force: bool = False,
 ) -> Optional[Path]:
     """Download IBTrACS cyclone track data for a given ocean basin.
 
     Args:
         save_dir: Directory to save the file (default: config data.raw_path)
-        basin: Ocean basin code (IO = Indian Ocean, NA = North Atlantic, etc.)
+        basin: Ocean basin code (NI = North Indian Ocean, NA = North Atlantic, etc.)
         force: Re-download even if file exists
 
     Returns:
@@ -190,9 +190,10 @@ def download_ibtracs(
     save_dir = save_dir or config.data.raw_path
     os.makedirs(save_dir, exist_ok=True)
 
-    # IBTrACS v04r01 CSV files by basin
+    # IBTrACS v04r01 CSV files by basin (NOAA replaced "IO" with "NI"/"SI")
     basin_urls = {
-        "IO": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.IO.list.v04r01.csv",
+        "NI": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.NI.list.v04r01.csv",
+        "SI": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.SI.list.v04r01.csv",
         "NA": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.NA.list.v04r01.csv",
         "EP": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.EP.list.v04r01.csv",
         "WP": "https://www.ncei.noaa.gov/data/international-best-track-archive-for-climate-stewardship-ibtracs/v04r01/access/csv/ibtracs.WP.list.v04r01.csv",
@@ -201,7 +202,7 @@ def download_ibtracs(
 
     url = basin_urls.get(basin.upper())
     if not url:
-        log.error("Unknown basin code: %s (use IO, NA, EP, WP, SP)", basin)
+        log.error("Unknown basin code: %s (use NI, SI, NA, EP, WP, SP)", basin)
         return None
 
     filename = f"ibtracs_{basin}.csv"

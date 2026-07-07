@@ -38,8 +38,7 @@ class TestCycloneIntensityModel:
     def test_predict_raises_if_not_trained(self, cyclone_model):
         X = pd.DataFrame({"lat_abs": [10.0], "lon": [80.0], "lat": [10.0],
                           "pressure_min": [1000], "dist_to_land": [0],
-                          "year": [2024], "month": [1], "dayofyear": [1],
-                          "wind_kts": [50]})
+                          "year": [2024], "month": [1], "dayofyear": [1]})
         with pytest.raises(RuntimeError, match="not trained"):
             cyclone_model.predict(X)
 

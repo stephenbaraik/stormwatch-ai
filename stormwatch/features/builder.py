@@ -30,7 +30,6 @@ CYCLONE_FEATURES = [
     "year",
     "month",
     "dayofyear",
-    "wind_kts",
 ]
 
 
@@ -85,13 +84,12 @@ def build_cyclone_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 # ──────────────────────────────────────────────
 
 HEATWAVE_FEATURES = [
-    "temp_max",
     "temp_max_lag_1",
     "temp_max_lag_3",
+    "temp_max_lag_7",
     "temp_max_roll_mean_3",
     "temp_max_roll_mean_7",
-    "temp_min",
-    "precipitation",
+    "temp_min_lag_1",
     "precipitation_lag_1",
     "relative_humidity_2m_mean",
     "wind_speed_10m_max",
@@ -103,37 +101,37 @@ HEATWAVE_FEATURES = [
 
 
 def build_heatwave_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-    """Build feature matrix and target for heatwave prediction.
+    """Build feature matrix and target for next-day heatwave forecasting.
 
-    Features:
-    - Temperature (current and lagged)
-    - Rolling temperature means
-    - Humidity
-    - Wind speed
-    - Pressure
-    - Seasonal features
+    Features are today's prior-day lags/rolling stats and today's exogenous
+    readings (humidity, wind, pressure, season) — never today's own
+    temp_max/temp_min, which is what heatwave_flag is defined from.
 
-    Target: heatwave_flag (binary)
+    Target: heatwave_flag on the *following* day (per city), so this is a
+    genuine 1-day-ahead forecast rather than a same-day lookup.
 
     Returns:
         (X, y)
     """
     df = df.copy()
+    if "city" in df.columns and "time" in df.columns:
+        df = df.sort_values(["city", "time"]).reset_index(drop=True)
+
+    target_col = "heatwave_flag"
+    if target_col not in df.columns:
+        log.error("Target column '%s' not found", target_col)
+        return pd.DataFrame(), pd.Series(dtype="int64")
+
+    y = df.groupby("city")[target_col].shift(-1)
+    valid = y.notna()
+    df = df[valid].copy()
+    y = y[valid].astype(int)
 
     available = [c for c in HEATWAVE_FEATURES if c in df.columns]
     X = df[available].copy() if available else pd.DataFrame()
 
-    # Fill remaining NaN for numeric columns
     for col in X.select_dtypes(include=[np.number]).columns:
         X[col] = X[col].fillna(X[col].median() if not X[col].isna().all() else 0)
-
-    # Target
-    target_col = "heatwave_flag"
-    if target_col not in df.columns:
-        log.error("Target column '%s' not found", target_col)
-        return X, pd.Series(dtype="int64")
-
-    y = df[target_col].astype(int)
 
     if not X.empty:
         log.info(
@@ -151,12 +149,12 @@ def build_heatwave_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
 # ──────────────────────────────────────────────
 
 RAINFALL_FEATURES = [
-    "precipitation",
     "precipitation_lag_1",
     "precipitation_lag_3",
+    "precipitation_lag_7",
     "precipitation_roll_mean_3",
     "precipitation_roll_mean_7",
-    "temp_max",
+    "temp_max_lag_1",
     "temp_max_roll_mean_3",
     "relative_humidity_2m_mean",
     "wind_speed_10m_max",
@@ -169,37 +167,38 @@ RAINFALL_FEATURES = [
 
 
 def build_rainfall_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-    """Build feature matrix and target for extreme rainfall prediction.
+    """Build feature matrix and target for next-day extreme rainfall forecasting.
 
-    Features:
-    - Precipitation (current and lagged)
-    - Rolling precipitation statistics
-    - Temperature
-    - Humidity
-    - Wind speed
-    - Pressure
-    - Cloud cover
-    - Seasonal features
+    Features are prior-day precipitation/temp lags and rolling stats plus
+    today's exogenous readings (humidity, wind, pressure, cloud cover,
+    season) — never today's own precipitation, which is what
+    extreme_rainfall is defined from.
 
-    Target: extreme_rainfall (binary)
+    Target: extreme_rainfall on the *following* day (per city) — a genuine
+    1-day-ahead forecast rather than a same-day lookup.
 
     Returns:
         (X, y)
     """
     df = df.copy()
+    if "city" in df.columns and "time" in df.columns:
+        df = df.sort_values(["city", "time"]).reset_index(drop=True)
+
+    target_col = "extreme_rainfall"
+    if target_col not in df.columns:
+        log.error("Target column '%s' not found", target_col)
+        return pd.DataFrame(), pd.Series(dtype="int64")
+
+    y = df.groupby("city")[target_col].shift(-1)
+    valid = y.notna()
+    df = df[valid].copy()
+    y = y[valid].astype(int)
 
     available = [c for c in RAINFALL_FEATURES if c in df.columns]
     X = df[available].copy() if available else pd.DataFrame()
 
     for col in X.select_dtypes(include=[np.number]).columns:
         X[col] = X[col].fillna(X[col].median() if not X[col].isna().all() else 0)
-
-    target_col = "extreme_rainfall"
-    if target_col not in df.columns:
-        log.error("Target column '%s' not found", target_col)
-        return X, pd.Series(dtype="int64")
-
-    y = df[target_col].astype(int)
 
     if not X.empty:
         log.info(

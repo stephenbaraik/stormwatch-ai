@@ -1,4 +1,4 @@
-.PHONY: help setup clean lint test run data train api docker-build docker-up
+.PHONY: help setup clean lint test run data train api docker-build docker-up mlflow-ui mlflow-serve promote-model figures
 
 help:
 	@echo "StormWatch AI - Makefile"
@@ -10,7 +10,11 @@ help:
 	@echo "monitor      : Run drift monitoring"
 	@echo "lint         : Run ruff + mypy"
 	@echo "test         : Run pytest suite"
+	@echo "figures      : Regenerate report figures"
 	@echo "clean        : Remove cache files"
+	@echo "mlflow-ui    : Start MLflow tracking UI"
+	@echo "mlflow-serve : Serve a model from MLflow registry"
+	@echo "promote-model: Promote model version in MLflow registry"
 	@echo "docker-build : Build Docker images"
 	@echo "docker-up    : Start full stack with Docker Compose"
 
@@ -40,6 +44,9 @@ monitor:
 pipeline-status:
 	python -m stormwatch.monitor.pipeline_status
 
+figures:
+	python scripts/generate_figures.py
+
 lint:
 	ruff check stormwatch/ tests/
 	mypy stormwatch/
@@ -52,8 +59,19 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	rm -rf .pytest_cache .ruff_cache .mypy_cache
 
+mlflow-ui:
+	mlflow ui --backend-store-uri sqlite:///mlflow/mlflow.db --port 5001 --host 127.0.0.1
+
+mlflow-serve:
+	@echo "Usage: make mlflow-serve MODEL=stormwatch-cyclone VERSION=1"
+	mlflow models serve -m "models:/$(MODEL)/$(VERSION)" --port 5002 --host 127.0.0.1
+
+promote-model:
+	@echo "Usage: make promote-model MODEL=stormwatch-cyclone VERSION=1 STAGE=Production"
+	python -c "from mlflow import MlflowClient; c = MlflowClient(); c.transition_model_version_stage(name='$(MODEL)', version='$(VERSION)', stage='$(STAGE)')"
+
 docker-build:
-	docker compose -f docker/docker-compose.yml build
+	docker compose build
 
 docker-up:
-	docker compose -f docker/docker-compose.yml up -d
+	docker compose up -d

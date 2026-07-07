@@ -89,7 +89,12 @@ def preprocess_cyclones(df: pd.DataFrame) -> pd.DataFrame:
 
     if nature_col:
         before = len(df)
-        df = df[df[nature_col].str.upper().str.contains("TC", na=False)].copy()
+        # IBTrACS NATURE codes: TS (tropical storm), DS (disturbance), ET
+        # (extratropical), MX (mixture/subtropical), NR (not reported).
+        # "TC" is not an actual code in the data; TS/MX are the tropical ones.
+        df = df[
+            df[nature_col].str.upper().str.contains("TS|MX", na=False, regex=True)
+        ].copy()
         log.info("Filtered to tropical cyclones: %d → %d records", before, len(df))
 
     # Determine wind speed column (prefer WMO, fall back to USA)
@@ -302,15 +307,17 @@ def prepare_weather_features(df: pd.DataFrame) -> pd.DataFrame:
         for lag in [1, 3, 7]:
             df[f"{col}_lag_{lag}"] = df.groupby("city")[col].shift(lag)
 
-    # Rolling statistics
+    # Rolling statistics — computed on the prior day's value onward so today's
+    # reading never leaks into today's rolling stat (used to forecast tomorrow).
     for col in ["temp_max", "precipitation"]:
         if col not in df.columns:
             continue
+        prior = df.groupby("city")[col].shift(1)
         for window in [3, 7]:
-            df[f"{col}_roll_mean_{window}"] = df.groupby("city")[col].transform(
+            df[f"{col}_roll_mean_{window}"] = prior.groupby(df["city"]).transform(
                 lambda s: s.rolling(window, min_periods=1).mean()
             )
-            df[f"{col}_roll_std_{window}"] = df.groupby("city")[col].transform(
+            df[f"{col}_roll_std_{window}"] = prior.groupby(df["city"]).transform(
                 lambda s: s.rolling(window, min_periods=1).std().fillna(0)
             )
 
