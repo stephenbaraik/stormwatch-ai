@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock
 
 import numpy as np
-import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 

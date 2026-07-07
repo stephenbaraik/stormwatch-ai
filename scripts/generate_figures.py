@@ -20,14 +20,14 @@ from pathlib import Path
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_PROJECT_ROOT))
 
-import joblib
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
-from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, roc_auc_score
-from sklearn.model_selection import train_test_split
+import joblib  # noqa: E402
+import matplotlib  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import seaborn as sns  # noqa: E402
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score, roc_auc_score  # noqa: E402
+from sklearn.model_selection import train_test_split  # noqa: E402
 
 matplotlib.use("Agg")
 warnings.filterwarnings("ignore")

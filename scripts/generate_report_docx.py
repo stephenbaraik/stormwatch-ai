@@ -9,15 +9,11 @@ Output: docs/StormWatch_AI_Report.docx
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from docx import Document
-from docx.enum.section import WD_ORIENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt, RGBColor
-from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 FIGURES = PROJECT_ROOT / "docs" / "figures"
