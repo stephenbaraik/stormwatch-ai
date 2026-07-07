@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import joblib
+import os
 import pandas as pd
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,10 +38,9 @@ log = get_logger(__name__)
 #  API key auth dependency
 # ──────────────────────────────────────────────
 
-import os
-
 API_KEY_NAME = "X-API-Key"
 _api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
 
 def require_api_key(api_key: str | None = Security(_api_key_header)):
     expected = os.getenv("STORMWATCH_API_KEY", "")
@@ -49,6 +49,7 @@ def require_api_key(api_key: str | None = Security(_api_key_header)):
     if api_key and api_key == expected:
         return True
     raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
 
 # ──────────────────────────────────────────────
 #  Global model cache
@@ -89,6 +90,7 @@ def _load_from_mlflow(model_name: str) -> object | None:
     """Try loading a model from the MLflow registry (Production alias)."""
     try:
         import mlflow
+
         cfg = get_config()
         uri = cfg.training.mlflow_tracking_uri
         mlflow.set_tracking_uri(uri)
@@ -98,10 +100,13 @@ def _load_from_mlflow(model_name: str) -> object | None:
         class _PipelineWrapper:
             def __init__(self, pipe):
                 self._pipe = pipe
+
             def predict(self, X):
                 return self._pipe.predict(X)
+
             def predict_proba(self, X):
                 return self._pipe.predict_proba(X)
+
             def is_trained(self):
                 return True
 

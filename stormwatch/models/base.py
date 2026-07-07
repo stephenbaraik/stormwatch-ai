@@ -153,7 +153,8 @@ class BaseWeatherModel(ABC):
             raise RuntimeError("Cannot log untrained model")
 
         sample = pd.DataFrame(
-            {f: [0.0] for f in self.feature_names} if self.feature_names
+            {f: [0.0] for f in self.feature_names}
+            if self.feature_names
             else {"_dummy": [0]}
         )
         for col in sample.columns:

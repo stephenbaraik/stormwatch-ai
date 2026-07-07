@@ -69,9 +69,7 @@ class HeatwaveFeatures(BaseModel):
         ..., description="Relative humidity (%)", ge=0, le=100
     )
     wind_speed_10m_max: float = Field(..., description="Max wind speed (km/h)", ge=0)
-    pressure_msl_mean: float = Field(
-        ..., description="Mean sea level pressure (hPa)"
-    )
+    pressure_msl_mean: float = Field(..., description="Mean sea level pressure (hPa)")
     month_sin: float = Field(..., description="Month sin encoding")
     month_cos: float = Field(..., description="Month cos encoding")
     month: int = Field(..., description="Month (1-12)", ge=1, le=12)
@@ -111,9 +109,7 @@ class RainfallFeatures(BaseModel):
         ..., description="Relative humidity (%)", ge=0, le=100
     )
     wind_speed_10m_max: float = Field(..., description="Max wind speed (km/h)", ge=0)
-    pressure_msl_mean: float = Field(
-        ..., description="Mean sea level pressure (hPa)"
-    )
+    pressure_msl_mean: float = Field(..., description="Mean sea level pressure (hPa)")
     cloud_cover_mean: float = Field(..., description="Cloud cover (%)", ge=0, le=100)
     month_sin: float = Field(..., description="Month sin encoding")
     month_cos: float = Field(..., description="Month cos encoding")

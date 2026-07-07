@@ -25,11 +25,10 @@ import math
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pyspark.sql import DataFrame, SparkSession
 from pyspark.sql import functions as F
-from pyspark.sql import types as T
 from pyspark.sql.window import Window
 
 # ──────────────────────────────────────────────
@@ -170,12 +169,8 @@ def add_seasonal_features(df: DataFrame, time_col: str = "time") -> DataFrame:
     df = df.withColumn("time_parsed", F.to_timestamp(F.col(time_col), "yyyy-MM-dd"))
     df = df.withColumn("month", F.month("time_parsed"))
     df = df.withColumn("dayofyear", F.dayofyear("time_parsed"))
-    df = df.withColumn(
-        "month_sin", F.sin(2 * math.pi * F.col("month") / 12)
-    )
-    df = df.withColumn(
-        "month_cos", F.cos(2 * math.pi * F.col("month") / 12)
-    )
+    df = df.withColumn("month_sin", F.sin(2 * math.pi * F.col("month") / 12))
+    df = df.withColumn("month_cos", F.cos(2 * math.pi * F.col("month") / 12))
     return df.drop("time_parsed")
 
 
@@ -215,14 +210,15 @@ def label_extreme_events_pyspark(df: DataFrame) -> DataFrame:
 
     df = df.withColumn(
         "hw_group",
-        F.sum("hw_change_flag").over(city_window.rowsBetween(Window.unboundedPreceding, 0)),
+        F.sum("hw_change_flag").over(
+            city_window.rowsBetween(Window.unboundedPreceding, 0)
+        ),
     )
 
     df = df.withColumn(
         "heatwave_streak",
-        F.row_number().over(
-            Window.partitionBy("city", "hw_group").orderBy("time")
-        ) * F.col("above_heatwave"),
+        F.row_number().over(Window.partitionBy("city", "hw_group").orderBy("time"))
+        * F.col("above_heatwave"),
     )
 
     # Same for severe heatwave
@@ -241,9 +237,8 @@ def label_extreme_events_pyspark(df: DataFrame) -> DataFrame:
     )
     df = df.withColumn(
         "severe_heatwave_streak",
-        F.row_number().over(
-            Window.partitionBy("city", "severe_group").orderBy("time")
-        ) * F.col("above_severe"),
+        F.row_number().over(Window.partitionBy("city", "severe_group").orderBy("time"))
+        * F.col("above_severe"),
     )
 
     df = df.withColumn(
@@ -257,7 +252,7 @@ def label_extreme_events_pyspark(df: DataFrame) -> DataFrame:
 
     # ── Percentile-based rainfall thresholds per city ──
     # PySpark's percentile_approx computes approximate quantiles
-    perc_expr = F.expr(f"percentile_approx(precipitation, 0.95)")
+    perc_expr = F.expr("percentile_approx(precipitation, 0.95)")
     severe_perc_expr = F.expr("percentile_approx(precipitation, 0.99)")
 
     city_thresholds = df.groupBy("city").agg(
@@ -418,19 +413,19 @@ def run_etl(
         df = rename_weather_columns(raw_df)
         print(f"[spark_etl] Raw rows: {df.count():,}")
 
-        print(f"[spark_etl] Adding seasonal features ...")
+        print("[spark_etl] Adding seasonal features ...")
         df = add_seasonal_features(df)
 
         # Step 4: Label extreme events
-        print(f"[spark_etl] Labeling extreme events ...")
+        print("[spark_etl] Labeling extreme events ...")
         df = label_extreme_events_pyspark(df)
 
         # Step 5: Create lag features (1, 3, 7 day)
-        print(f"[spark_etl] Creating lag features ...")
+        print("[spark_etl] Creating lag features ...")
         df = add_lag_features(df)
 
         # Step 6: Add rolling statistics (3, 7 day window)
-        print(f"[spark_etl] Adding rolling statistics ...")
+        print("[spark_etl] Adding rolling statistics ...")
         df = add_rolling_stats(df)
 
         # Drop rows where all lag features are null (first rows per city)
@@ -463,7 +458,7 @@ def run_etl(
             F.sum("cyclonic_flag").alias("cyclonic_events"),
         ).collect()[0]
 
-        print(f"[spark_etl] Event summary:")
+        print("[spark_etl] Event summary:")
         print(f"  Heatwaves:       {event_counts['heatwaves'] or 0:,}")
         print(f"  Severe HWs:      {event_counts['severe_heatwaves'] or 0:,}")
         print(f"  Extreme rain:    {event_counts['extreme_rain'] or 0:,}")
@@ -483,9 +478,7 @@ def run_etl(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="StormWatch AI - PySpark ETL Pipeline"
-    )
+    parser = argparse.ArgumentParser(description="StormWatch AI - PySpark ETL Pipeline")
     parser.add_argument(
         "--raw-dir",
         type=Path,
